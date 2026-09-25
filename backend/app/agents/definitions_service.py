@@ -87,8 +87,8 @@ def create_definition(db: Session, key: str, title: str = "", type: str = "agent
     if type not in _DEF_TYPES:
         raise HTTPException(422, f"type must be one of {_DEF_TYPES}")
     cols = ("instructions", "behavior_rules", "methodology", "capabilities",
-            "tools", "workflow", "model_defaults", "safety_rules",
-            "output_format", "description", "is_active")
+            "tools", "workflow", "model_defaults", "prompt_templates",
+            "safety_rules", "output_format", "description", "is_active")
     row = AgentDefinition(key=key, title=(title or key)[:200], type=type)
     for c in cols:
         if c in fields and fields[c] is not None:
@@ -129,7 +129,8 @@ def update_definition(db: Session, definition_id, patch: dict) -> AgentDefinitio
     row = get_definition(db, definition_id)
     allowed = ("title", "description", "type", "instructions", "behavior_rules",
                "methodology", "capabilities", "tools", "workflow",
-               "model_defaults", "safety_rules", "output_format", "is_active")
+               "model_defaults", "prompt_templates", "safety_rules",
+               "output_format", "is_active")
     for k, v in (patch or {}).items():
         if k in allowed and v is not None:
             if k == "type" and v not in _DEF_TYPES:

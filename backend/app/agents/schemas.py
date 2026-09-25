@@ -99,6 +99,7 @@ class DefinitionCreate(BaseModel):
     tools: dict = {}
     workflow: dict = {}
     model_defaults: dict = {}
+    prompt_templates: dict = {}
     safety_rules: dict = {}
     output_format: dict = {}
     is_active: bool = True
@@ -115,6 +116,7 @@ class DefinitionUpdate(BaseModel):
     tools: dict | None = None
     workflow: dict | None = None
     model_defaults: dict | None = None
+    prompt_templates: dict | None = None
     safety_rules: dict | None = None
     output_format: dict | None = None
     is_active: bool | None = None
@@ -133,6 +135,7 @@ class DefinitionOut(BaseModel):
     tools: dict
     workflow: dict
     model_defaults: dict
+    prompt_templates: dict
     safety_rules: dict
     output_format: dict
     is_active: bool

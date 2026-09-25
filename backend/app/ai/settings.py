@@ -30,8 +30,8 @@ DEFAULT_AI_SETTINGS: dict[str, dict] = {
         "provider": "openai_compat",
         "model": "whisper-1",
     },
-    "agent.teacher_lesson_planner": {"model": "gpt-4o-mini"},
-    "agent.student_academic_coach": {"model": "gpt-4o-mini"},
+    "agent.teacher_lesson_planner": {"model": "gemini-2.5-flash"},
+    "agent.student_academic_coach": {"model": "gemini-2.5-flash"},
     "retrieval.rerank": {"enabled": True, "method": "heuristic"},
     # Phase 2 top-up: system-level OCR/Vision selection (Admin panel only).
     # ocr.provider: "gemini" (DEFAULT: spike-proven on Persian) | "easyocr"
@@ -80,6 +80,50 @@ def get_setting(db: Session | None, key: str) -> dict:
     merged = list_settings(db)
     env = _env_default(key)
     return {**env, **merged[key]}
+
+
+# Providers the agent chat resolver accepts. Anything else falls back to
+# the chat.default provider (admin typos must never 500 a chat turn).
+_KNOWN_AGENT_PROVIDERS = ("openai_compat", "gemini")
+
+_AGENT_CHAT_KEYS = ("provider", "model", "temperature", "max_tokens")
+
+
+def resolve_agent_chat(db: Session | None, agent_key: str, definition=None) -> dict:
+    """Effective chat config for one agent: layers
+    chat.default <- agent.<key> <- definition.model_defaults.
+
+    Returns {provider, model, temperature, max_tokens, sources} where
+    sources maps each key to the winning layer (shown in Agent Studio).
+    Unknown agent keys (custom keys with no ai_settings row) fall back
+    to chat.default; unknown providers fall back to the chat provider.
+    """
+    base = get_setting(db, "chat.default")
+    cfg = {"provider": base.get("provider", "openai_compat"),
+           "model": base.get("model"),
+           "temperature": base.get("temperature", 0.7),
+           "max_tokens": base.get("max_tokens", 1500)}
+    sources = {k: "chat.default" for k in _AGENT_CHAT_KEYS}
+    try:
+        overlay = get_setting(db, f"agent.{agent_key}") or {}
+    except KeyError:
+        overlay = {}
+    if isinstance(overlay, dict):
+        for k in _AGENT_CHAT_KEYS:
+            if overlay.get(k) is not None:
+                cfg[k] = overlay[k]
+                sources[k] = f"agent.{agent_key}"
+    md = getattr(definition, "model_defaults", None) if definition is not None else None
+    if isinstance(md, dict):
+        for k in _AGENT_CHAT_KEYS:
+            if md.get(k) is not None:
+                cfg[k] = md[k]
+                sources[k] = "definition.model_defaults"
+    if cfg.get("provider") not in _KNOWN_AGENT_PROVIDERS:
+        cfg["provider"] = base.get("provider", "openai_compat")
+        sources["provider"] = "chat.default (fallback)"
+    cfg["sources"] = sources
+    return cfg
 
 
 def upsert_setting(db: Session, key: str, value: dict) -> dict:

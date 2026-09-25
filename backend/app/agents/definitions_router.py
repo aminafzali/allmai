@@ -51,10 +51,38 @@ def create_def(body: schemas.DefinitionCreate,
     return row
 
 
+@router.get("/prompts/defaults")
+def get_prompt_defaults(db: Session = Depends(get_db),
+                        admin: User = Depends(require_admin)):
+    """Built-in prompt templates + placeholders (Studio reference).
+    Static route: must stay above /{definition_id}."""
+    from app.agents.prompt_templates import DEFAULTS, TEMPLATE_DOCS
+
+    return {"templates": [
+        {"key": k, "description": TEMPLATE_DOCS[k]["description"],
+         "placeholders": TEMPLATE_DOCS[k]["placeholders"],
+         "default": DEFAULTS[k]}
+        for k in DEFAULTS
+    ]}
+
+
 @router.get("/{definition_id}", response_model=schemas.DefinitionOut)
 def get_def(definition_id: str, db: Session = Depends(get_db),
             admin: User = Depends(require_admin)):
     return get_definition(db, definition_id)
+
+
+@router.get("/{definition_id}/effective-config")
+def get_def_effective_config(definition_id: str, db: Session = Depends(get_db),
+                             admin: User = Depends(require_admin)):
+    """Resolved chat config actually used for this definition's turns:
+    provider/model/temperature/max_tokens + which layer won each key
+    (definition.model_defaults > agent.<key> > chat.default)."""
+    from app.ai.settings import resolve_agent_chat
+
+    definition = get_definition(db, definition_id)  # 404 if missing
+    cfg = resolve_agent_chat(db, definition.key, definition)
+    return {"definition_id": str(definition.id), "agent_key": definition.key, **cfg}
 
 
 @router.put("/{definition_id}", response_model=schemas.DefinitionOut)

@@ -434,3 +434,91 @@ def test_admin_definition_crud_and_instances(client):
     gkbs = c.get("/admin/global-knowledge-bases", headers=_h(tadm)).json()
     assert {k["title"] for k in gkbs} >= {"Fit G", "Chem G"}
     assert all(k["scope"] == "global" and k["workspace_id"] is None for k in gkbs)
+
+
+# ---------- effective model config (Agent Studio) ----------
+
+def test_resolve_agent_chat_layers(db):
+    from types import SimpleNamespace
+
+    from app.ai.settings import resolve_agent_chat, upsert_setting
+
+    base = resolve_agent_chat(db, "teacher_lesson_planner")
+    assert base["model"] == "gemini-2.5-flash"
+    assert base["temperature"] == 0.7 and base["max_tokens"] == 1500
+    assert base["provider"] == "openai_compat"
+    assert base["sources"]["model"] == "agent.teacher_lesson_planner"
+    assert base["sources"]["temperature"] == "chat.default"
+    assert base["sources"]["max_tokens"] == "chat.default"
+    assert base["sources"]["provider"] == "chat.default"
+    # agent.<key> overlay wins over chat.default
+    upsert_setting(db, "agent.teacher_lesson_planner",
+                   {"temperature": 0.3, "max_tokens": 800})
+    cfg = resolve_agent_chat(db, "teacher_lesson_planner")
+    assert (cfg["temperature"], cfg["max_tokens"]) == (0.3, 800)
+    assert cfg["sources"]["temperature"] == "agent.teacher_lesson_planner"
+    # definition.model_defaults wins over everything (incl. provider)
+    d = SimpleNamespace(model_defaults={"model": "gpt-4o-mini", "provider": "gemini",
+                                        "temperature": 0.9, "max_tokens": 500})
+    cfg2 = resolve_agent_chat(db, "teacher_lesson_planner", d)
+    assert (cfg2["model"], cfg2["provider"], cfg2["temperature"], cfg2["max_tokens"]) == \
+        ("gpt-4o-mini", "gemini", 0.9, 500)
+    assert cfg2["sources"]["model"] == "definition.model_defaults"
+    # unknown agent key -> chat.default; garbage provider -> chat provider
+    cfg3 = resolve_agent_chat(db, "nope_custom_key")
+    assert cfg3["model"] == "gpt-4o-mini" and cfg3["provider"] == "openai_compat"
+    upsert_setting(db, "agent.teacher_lesson_planner", {"provider": "bogus"})
+    cfg4 = resolve_agent_chat(db, "teacher_lesson_planner")
+    assert cfg4["provider"] == "openai_compat"
+    assert cfg4["sources"]["provider"] == "chat.default (fallback)"
+
+
+def test_effective_config_endpoint(client):
+    c, seed = client
+    tadm = _token(c, "admin@x.com")
+    ta = _token(c, "a@x.com")
+    did = str(seed["fit"].id)
+    assert c.get(f"/admin/agent-definitions/{did}/effective-config",
+                 headers=_h(ta)).status_code in (401, 403)
+    r = c.get(f"/admin/agent-definitions/{did}/effective-config", headers=_h(tadm))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["agent_key"] == "fitness_coach"
+    assert body["model"] and body["temperature"] == 0.7 and body["max_tokens"] == 1500
+    assert set(body["sources"]) == {"provider", "model", "temperature", "max_tokens"}
+    # definition override roundtrip via PUT is reflected
+    upd = c.put(f"/admin/agent-definitions/{did}", headers=_h(tadm),
+                json={"model_defaults": {"model": "gemini-2.5-flash",
+                                         "temperature": 0.2, "max_tokens": 900}})
+    assert upd.status_code == 200, upd.text
+    body2 = c.get(f"/admin/agent-definitions/{did}/effective-config",
+                  headers=_h(tadm)).json()
+    assert (body2["model"], body2["temperature"], body2["max_tokens"]) == \
+        ("gemini-2.5-flash", 0.2, 900)
+    assert body2["sources"]["max_tokens"] == "definition.model_defaults"
+    assert c.get("/admin/agent-definitions/00000000-0000-0000-0000-000000000000/effective-config",
+                 headers=_h(tadm)).status_code == 404
+
+
+def test_prompt_defaults_and_overrides(client):
+    c, seed = client
+    tadm = _token(c, "admin@x.com")
+    ta = _token(c, "a@x.com")
+    assert c.get("/admin/agent-definitions/prompts/defaults",
+                 headers=_h(ta)).status_code in (401, 403)
+    r = c.get("/admin/agent-definitions/prompts/defaults", headers=_h(tadm))
+    assert r.status_code == 200, r.text
+    by_key = {t["key"]: t for t in r.json()["templates"]}
+    assert set(by_key) == {"lesson_plan", "coach_chat", "study_plan"}
+    assert "chapter" in by_key["lesson_plan"]["placeholders"]
+    assert by_key["coach_chat"]["default"]
+    # PUT roundtrip on a definition
+    did = str(seed["fit"].id)
+    upd = c.put(f"/admin/agent-definitions/{did}", headers=_h(tadm),
+                json={"prompt_templates": {"coach_chat": "CUSTOM {message} {plan}"}})
+    assert upd.status_code == 200, upd.text
+    assert upd.json()["prompt_templates"] == {"coach_chat": "CUSTOM {message} {plan}"}
+    # unknown template keys are allowed (future agents), empty clears
+    upd2 = c.put(f"/admin/agent-definitions/{did}", headers=_h(tadm),
+                 json={"prompt_templates": {}})
+    assert upd2.json()["prompt_templates"] == {}

@@ -72,11 +72,15 @@ def client(db):
         finally:
             pass
 
+    from app.knowledge.retrieval.hybrid import get_generate_tools_fn
+
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_storage] = lambda: fake
     app.dependency_overrides[get_embed_fn] = lambda: (lambda texts: [[1.0, 0.0] for _ in texts])
     app.dependency_overrides[get_generate_fn] = lambda: (lambda prompt, **kw: "پاسخ [1]")
     app.dependency_overrides[get_generate_structured_fn] = lambda: _fake_structured
+    # hermetic: coach tool rounds stay off in the offline e2e
+    app.dependency_overrides[get_generate_tools_fn] = lambda: None
     yield TestClient(app), fake, db
     app.dependency_overrides.clear()
 

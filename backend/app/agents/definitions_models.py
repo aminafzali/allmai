@@ -49,6 +49,9 @@ class AgentDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     model_defaults: Mapped[dict] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"), default=_json_default
     )
+    prompt_templates: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), default=_json_default
+    )
     safety_rules: Mapped[dict] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"), default=_json_default
     )

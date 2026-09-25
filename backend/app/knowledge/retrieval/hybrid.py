@@ -262,3 +262,11 @@ def get_stream_fn(db=None):
     from app.ai.factory import get_chat_provider
 
     return get_chat_provider(db).stream
+
+
+def get_generate_tools_fn(db=None):
+    """Dependency: one tool-calling chat round, or None when the
+    configured provider offers no tool support (plain answer path)."""
+    from app.ai.factory import get_chat_provider
+
+    return getattr(get_chat_provider(db), "generate_with_tools", None)

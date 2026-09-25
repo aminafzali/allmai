@@ -51,6 +51,7 @@ class CoachChatOut(BaseModel):
     answer: str
     conversation_id: str
     has_plan: bool = False
+    tools_used: list[str] = []
 
 
 class ProgressUpdate(BaseModel):

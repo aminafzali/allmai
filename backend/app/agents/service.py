@@ -241,23 +241,27 @@ def _tools_of(definition, spec: dict) -> list[str]:
 
 
 def _model_config(db: Session, agent: Agent, definition=None) -> tuple[str | None, dict]:
-    if definition is not None:
-        md = getattr(definition, "model_defaults", None) or {}
-        if isinstance(md, dict) and md.get("model"):
-            chat_cfg = get_setting(db, "chat.default")
-            merged = dict(chat_cfg)
-            for k in ("temperature", "max_tokens"):
-                if k in md:
-                    merged[k] = md[k]
-            return md.get("model"), merged
-    model_key = f"agent.{agent.key}"
+    """Effective (model, chat_cfg) via the central resolver.
+
+    chat_cfg carries provider/model/temperature/max_tokens (+sources);
+    existing callers keep working unchanged.
+    """
+    from app.ai.settings import resolve_agent_chat
+
+    cfg = resolve_agent_chat(db, agent.key, definition)
+    return cfg.get("model"), cfg
+
+
+def _provider_for(chat_cfg: dict):
+    """Provider instance honoring the resolved agent provider."""
+    from app.ai.factory import get_provider
+
     try:
-        model_cfg = get_setting(db, model_key)
-        model = model_cfg.get("model")
-    except KeyError:
-        model = get_setting(db, "chat.default").get("model")
-    chat_cfg = get_setting(db, "chat.default")
-    return model, chat_cfg
+        return get_provider((chat_cfg or {}).get("provider") or "openai_compat")
+    except ValueError:
+        from app.ai.factory import get_provider as _gp
+
+        return _gp("openai_compat")
 
 
 def _spec_for(agent: Agent, definition=None) -> dict:
@@ -349,6 +353,8 @@ def chat(db: Session, ws: Workspace, agent: Agent, user: User, message: str,
 
     clean, conv, history, definition, spec, instructions, model, chat_cfg = \
         _prepare_chat(db, ws, agent, user, message, conversation_id, kb_id)
+    if generate_fn is None:
+        generate_fn = _provider_for(chat_cfg).generate
     try:
         deps = RuntimeDeps(db=db, embed_fn=embed_fn, generate_fn=generate_fn, model=model,
                            temperature=float(chat_cfg.get("temperature", 0.7)),
@@ -406,9 +412,7 @@ async def chat_stream_events(db: Session, ws: Workspace, agent: Agent, user: Use
         yield {"type": "meta", "conversation_id": str(conv.id), "citations": citations}
 
         if stream_fn is None:
-            from app.ai.factory import get_chat_provider
-
-            stream_fn = get_chat_provider(db).stream
+            stream_fn = _provider_for(chat_cfg).stream
         parts: list[str] = []
         try:
             async for delta in stream_fn(state["prompt"], model=model,

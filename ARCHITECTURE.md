@@ -103,8 +103,14 @@ resolution order = DB row → ENV/code default. Keys: `chat.default`,
 `agent.teacher_lesson_planner`, `agent.student_academic_coach`.
 Cheap defaults (verified live against the GapGPT model list):
 chat `gpt-4o-mini`, embedding `text-embedding-3-small` (1536d),
-audio `whisper-1` + local fallback. The admin panel (Phase 11) edits
-these; unknown keys are rejected (422).
+audio `whisper-1` + local fallback, agents `gemini-2.5-flash` (chat +
+structured + tool rounds, all GapGPT-routed). The admin panel (Phase 11) edits
+these; unknown keys are rejected (422). Per-agent provider/model/
+temperature/max_tokens resolve as chat.default ← agent.\<key\> ←
+definition.model_defaults (see `resolve_agent_chat`); prompt templates
+(lesson_plan/coach_chat/study_plan) live on the definition with built-in
+fallbacks. The student coach acts on plans via tools (get/create/progress)
+inside the same chat turn.
 
 ## 3. Workspace isolation (the most important rule)
 

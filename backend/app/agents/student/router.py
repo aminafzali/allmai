@@ -15,7 +15,9 @@ from app.agents.student.service import (
 from app.agents.teacher.service import get_generate_structured_fn
 from app.auth.service import get_current_user
 from app.core.database import get_db
-from app.knowledge.retrieval.hybrid import get_embed_fn, get_generate_fn, get_stream_fn
+from app.knowledge.retrieval.hybrid import (
+    get_embed_fn, get_generate_fn, get_generate_tools_fn, get_stream_fn,
+)
 from app.users.models import User
 from app.workspaces.models import Workspace
 from app.workspaces.service import resolve_workspace
@@ -76,13 +78,15 @@ def post_coach_chat(
     user: User = Depends(get_current_user),
     embed_fn=Depends(get_embed_fn),
     generate_fn=Depends(get_generate_fn),
+    generate_tools_fn=Depends(get_generate_tools_fn),
 ):
     from app.common.rate_limit import check
 
     check("chat", str(user.id), calls=60, period_seconds=60)
     agent = get_agent(db, ws, agent_id, user)
     return coach_chat(db, ws, agent, user, body.message, body.conversation_id,
-                      body.kb_id, embed_fn=embed_fn, generate_fn=generate_fn)
+                      body.kb_id, embed_fn=embed_fn, generate_fn=generate_fn,
+                      generate_tools_fn=generate_tools_fn)
 
 
 @router.post("/workspaces/{workspace_id}/agents/{agent_id}/coach/chat/stream")

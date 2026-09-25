@@ -15,7 +15,6 @@ from app.agents.teacher.schemas import (
     LessonPlanResponse,
     SourceRefOut,
 )
-from app.ai.settings import get_setting
 from app.auth.service import audit
 from app.common.base import coerce_uuid
 from app.conversations.models import Conversation, Message
@@ -24,6 +23,17 @@ from app.users.models import User
 from app.workspaces.models import Workspace
 
 AGENT_KEY = "teacher_lesson_planner"
+
+
+def _provider_for(chat_cfg: dict):
+    from app.ai.factory import get_provider
+
+    try:
+        return get_provider((chat_cfg or {}).get("provider") or "openai_compat")
+    except ValueError:
+        from app.ai.factory import get_provider as _gp
+
+        return _gp("openai_compat")
 
 
 def get_generate_structured_fn(db=None):
@@ -45,8 +55,21 @@ def build_lesson_plan(
     from app.agents.definitions_service import require_agent_access
 
     require_agent_access(agent, user)
+    from app.ai.settings import resolve_agent_chat
+
+    definition = None
+    try:
+        from app.agents.definitions_service import get_definition
+
+        did = getattr(agent, "definition_id", None)
+        if did:
+            definition = get_definition(db, did)
+    except Exception:
+        definition = None
+    cfg = resolve_agent_chat(db, AGENT_KEY, definition)
+    model = cfg.get("model")
     if generate_structured_fn is None:
-        generate_structured_fn = get_generate_structured_fn()
+        generate_structured_fn = _provider_for(cfg).generate_structured
 
     query = f"{body.chapter} {body.instructions}".strip()
     hits = hybrid_search(db, ws.id, query, body.kb_id, top_k=8, embed_fn=embed_fn)
@@ -59,11 +82,19 @@ def build_lesson_plan(
     context = "\n\n".join(parts)
 
     from app.agents.teacher.schemas import LessonPlanBody
+    from app.agents import prompt_templates as PT
 
-    chat_cfg = get_setting(db, f"agent.{AGENT_KEY}")
-    model = chat_cfg.get("model") or get_setting(db, "chat.default").get("model")
-    prompt = build_lesson_prompt(body.chapter, body.grade, body.duration_minutes,
-                                 body.teaching_style, body.instructions, context)
+    extra = (f"\nTeacher's extra instructions: {body.instructions}"
+             if (body.instructions or "").strip() else "")
+    prompt = PT.render(PT.get_template(definition, "lesson_plan"), {
+        "chapter": body.chapter, "grade": body.grade,
+        "duration_minutes": body.duration_minutes,
+        "teaching_style": body.teaching_style,
+        "instructions_block": extra, "context": context or "(empty)",
+    })
+    if prompt is None:
+        prompt = build_lesson_prompt(body.chapter, body.grade, body.duration_minutes,
+                                     body.teaching_style, body.instructions, context)
     generated: LessonPlanBody = generate_structured_fn(prompt, LessonPlanBody, model=model)
 
     refs = [

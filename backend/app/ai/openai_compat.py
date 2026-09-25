@@ -152,6 +152,44 @@ class OpenAICompatProvider:
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"unexpected audio response: {data!r}"[:500]) from exc
 
+    def generate_with_tools(self, messages: list, tools: list,
+                              model: str | None = None, **kw) -> dict:
+        """One chat round with OpenAI-style function tools (GapGPT-routed).
+
+        Returns {"text": str, "calls": [{id, name, arguments}]}. Malformed
+        tool calls are dropped, never raised — callers decide the loop.
+        """
+        import json as _json
+
+        data = self._post(
+            self.chat_url,
+            {
+                "model": model or self.chat_model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": kw.get("tool_choice", "auto"),
+                "temperature": kw.get("temperature", 0.3),
+                "max_tokens": kw.get("max_tokens", 1500),
+            },
+            timeout=kw.get("timeout", 180.0),
+        )
+        try:
+            msg = data["choices"][0].get("message") or {}
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(f"unexpected tools response: {data!r}"[:500]) from exc
+        calls = []
+        for tc in msg.get("tool_calls") or []:
+            fn = (tc or {}).get("function") or {}
+            try:
+                args = _json.loads(fn.get("arguments") or "{}")
+            except Exception:
+                continue
+            if fn.get("name") and isinstance(args, dict):
+                calls.append({"id": tc.get("id"), "name": fn["name"],
+                              "arguments": args})
+        content = msg.get("content")
+        return {"text": content if isinstance(content, str) else "", "calls": calls}
+
     def generate_structured(self, prompt: str, schema, model: str | None = None, **kw):
         """JSON-mode generation validated into a Pydantic schema."""
         import json as _json

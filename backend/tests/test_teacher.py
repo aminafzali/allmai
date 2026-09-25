@@ -198,3 +198,93 @@ def test_lesson_plan_wrong_agent_and_isolation(client):
 def test_prompt_builder_pure():
     p = build_lesson_prompt("Acids", "9th", 45, "lecture", "", "ctx")
     assert "Acids" in p and "45" in p and "ctx" in p
+
+
+def test_lesson_prompt_template_parity():
+    from app.agents.prompt_templates import DEFAULTS, render
+
+    out = render(DEFAULTS["lesson_plan"], {
+        "chapter": "Acids", "grade": "9th", "duration_minutes": 45,
+        "teaching_style": "lecture",
+        "instructions_block": "\nTeacher's extra instructions: Focus.",
+        "context": "ctx"})
+    assert out == build_lesson_prompt("Acids", "9th", 45, "lecture", "Focus.", "ctx")
+    assert render("a {nope} b", {}) is None  # unrenderable -> default
+    assert render("", {}) is None and render(None, {}) is None
+
+
+def test_lesson_plan_custom_template_used(db, monkeypatch):
+    from app.agents.definitions_models import AgentDefinition
+    from app.agents.models import Agent
+    from app.agents.teacher.schemas import LessonPlanIn
+    from app.agents.teacher.service import build_lesson_plan
+
+    _seed(db)
+    with TestingSession() as s:
+        wa = s.query(Workspace).filter(Workspace.name == "A").one()
+        kb = s.query(KnowledgeBase).filter(KnowledgeBase.title == "Chem").one()
+        ua = s.query(User).filter(User.email == "a@x.com").one()
+        wa_id, kb_id, ua_id = wa.id, kb.id, ua.id
+    definition = AgentDefinition(
+        key="teacher_lesson_planner", title="T", instructions="Teach.",
+        prompt_templates={"lesson_plan": "CUSTOM[{chapter}|{grade}|{duration_minutes}|"
+                                         "{teaching_style}|{instructions_block}|{context}]"})
+    db.add(definition)
+    db.commit()
+    db.add(Agent(workspace_id=wa_id, key="teacher_lesson_planner",
+                 type="agent", name="T", definition_id=definition.id))
+    db.commit()
+    with TestingSession() as s:
+        agent = s.query(Agent).filter(Agent.workspace_id == wa_id).one()
+        ws = s.query(Workspace).filter(Workspace.id == wa_id).one()
+        user = s.query(User).filter(User.id == ua_id).one()
+        body = LessonPlanIn(kb_id=kb_id, chapter="Acids", grade="9th")
+        out = build_lesson_plan(s, ws, agent, user, body,
+                                embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+                                generate_structured_fn=_fake_generate_structured)
+    assert out.plan.title == "Acids lesson"
+    assert PROMPTS[-1].startswith("CUSTOM[Acids|9th|45|")
+    assert "curriculum designer" not in PROMPTS[-1]
+
+
+def test_lesson_plan_uses_agent_provider_and_model(db, monkeypatch):
+    from app.agents.models import Agent
+    from app.agents.teacher.schemas import LessonPlanIn
+    from app.agents.teacher.service import build_lesson_plan
+    from app.ai import factory as F
+    from app.ai.settings import upsert_setting
+
+    _seed(db)
+    with TestingSession() as s:
+        wa = s.query(Workspace).filter(Workspace.name == "A").one()
+        kb = s.query(KnowledgeBase).filter(KnowledgeBase.title == "Chem").one()
+        ua = s.query(User).filter(User.email == "a@x.com").one()
+        wa_id, kb_id, ua_id = wa.id, kb.id, ua.id
+    upsert_setting(db, "agent.teacher_lesson_planner",
+                   {"provider": "gemini", "model": "gemini-2.5-flash"})
+    seen = {}
+
+    class FakeProvider:
+        def generate_structured(self, prompt, schema, model=None, **kw):
+            seen["provider"] = "gemini"
+            seen["model"] = model
+            return _fake_generate_structured(prompt, schema)
+
+    def fake_get_provider(name="openai_compat"):
+        seen["asked"] = name
+        return FakeProvider()
+
+    monkeypatch.setattr(F, "get_provider", fake_get_provider)
+    db.add(Agent(workspace_id=wa_id, key="teacher_lesson_planner",
+                 type="agent", name="T"))
+    db.commit()
+    with TestingSession() as s:
+        agent = s.query(Agent).filter(Agent.workspace_id == wa_id).one()
+        ws = s.query(Workspace).filter(Workspace.id == wa_id).one()
+        user = s.query(User).filter(User.id == ua_id).one()
+        body = LessonPlanIn(kb_id=kb_id, chapter="Acids", grade="9th")
+        out = build_lesson_plan(s, ws, agent, user, body,
+                                embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+                                generate_structured_fn=None)
+    assert seen["asked"] == "gemini" and seen["model"] == "gemini-2.5-flash"
+    assert out.plan.title == "Acids lesson"
