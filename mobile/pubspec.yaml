@@ -1,0 +1,22 @@
+name: allmai
+description: AllMai AI Platform — single codebase, teacher/student role-based UI (Phase 0 skeleton).
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ">=3.2.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  http: ^1.2.0
+  go_router: ^14.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,33 @@
+fastapi==0.141.1
+uvicorn==0.53.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+SQLAlchemy==2.0.54
+alembic==1.20.0
+psycopg2-binary==2.9.13
+pgvector==0.5.0
+celery==5.6.3
+redis==5.0.1
+boto3==1.43.101
+python-jose==3.5.0
+python-multipart==0.0.32
+bcrypt==5.0.0
+email-validator==2.3.0
+python-dotenv==1.2.3
+httpx==0.28.1
+pytest==9.1.1
+langgraph
+pypdf
+python-docx
+python-pptx
+beautifulsoup4
+pillow
+# --- Phase 2 Document Core (pinned from Spike on Win/Python 3.12) ---
+# docling 2.130.0: layout/tableformer/rapidocr via onnxruntime (CPU).
+# easyocr 1.7.2: mandatory Persian OCR (RapidOCR has no 'fa' model — spike).
+# raganything 1.4.1: parser subsystem ONLY (get_parser("docling"));
+#   full engine/LightRAG paths are forbidden (see test_architecture.py).
+docling==2.130.0
+easyocr==1.7.2
+pypdfium2==5.13.0
+raganything==1.4.1
