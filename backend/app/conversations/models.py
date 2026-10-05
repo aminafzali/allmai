@@ -3,7 +3,7 @@
 
 import uuid
 
-from sqlalchemy import ForeignKey, JSON, String, Text, Uuid
+from sqlalchemy import Boolean, ForeignKey, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -24,6 +24,9 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     state: Mapped[dict] = mapped_column(JSON, default=dict)
+    # AI-generated short title (user-editable) + user pin.
+    title: Mapped[str] = mapped_column(String(200), default="")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
 class Message(UUIDPrimaryKeyMixin, TimestampMixin, Base):

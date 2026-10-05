@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AllMai worker supervisor (Windows Task Scheduler import file).
+  Import once (elevated):  schtasks /Create /TN "AllMaiWorker" /XML scripts\allmai-worker.xml
+  Then: schtasks /Run /TN "AllMaiWorker"
+
+  - Starts the Celery solo worker at boot/logon (hidden, whether or not a
+    user is logged on), restarts it on failure with backoff.
+  - ADJUST THE PATHS BELOW to this checkout before importing.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>AllMai ingestion worker (celery solo). Auto-restart on death so stuck processing rows cannot outlive the worker.</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT2M</Delay>
+    </BootTrigger>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT1M</Delay>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>Password</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT2M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>G:\MyProjects\allmai\.venv\Scripts\celery.exe</Command>
+      <Arguments>-A workers.celery_app.celery worker --loglevel=info --pool=solo</Arguments>
+      <WorkingDirectory>G:\MyProjects\allmai\backend</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

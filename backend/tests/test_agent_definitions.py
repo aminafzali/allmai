@@ -38,6 +38,12 @@ TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 PROMPTS: list[str] = []
 
 
+def _last_chat_prompt() -> str:
+    """Latest chat prompt (skips auto-title prompts appended after turns)."""
+    return next(p for p in reversed(PROMPTS)
+                if not p.startswith("یک عنوان فارسی"))
+
+
 @pytest.fixture()
 def db():
     Base.metadata.drop_all(engine)
@@ -309,8 +315,8 @@ def test_effective_instructions_precedence(client):
             json={"custom_instructions": "Always reply briefly."})
     c.post(f"/workspaces/{w}/agents/{a['id']}/chat", headers=_h(ta),
            json={"message": "hi"})
-    assert "Coach fitness." in PROMPTS[-1]  # definition
-    assert "Always reply briefly." in PROMPTS[-1]  # custom appended
+    assert "Coach fitness." in _last_chat_prompt()  # definition
+    assert "Always reply briefly." in _last_chat_prompt()  # custom appended
     # legacy config fallback: definition-less instance reads config.instructions
     leg = c.post(f"/workspaces/{w}/agents", headers=_h(ta),
                  json={"key": "teacher_lesson_planner", "type": "agent",
@@ -323,7 +329,7 @@ def test_effective_instructions_precedence(client):
     assert got["runtime_state"]["current_course"] == "Cutting 101"
     c.post(f"/workspaces/{w}/agents/{a['id']}/chat", headers=_h(ta),
            json={"message": "next?"})
-    assert "Cutting 101" in PROMPTS[-1]
+    assert "Cutting 101" in _last_chat_prompt()
     # ... but B cannot read A's state
     tb = _token(c, "b@x.com")
     assert c.get(f"/workspaces/{w}/agents/{a['id']}/state",
@@ -436,6 +442,38 @@ def test_admin_definition_crud_and_instances(client):
     assert all(k["scope"] == "global" and k["workspace_id"] is None for k in gkbs)
 
 
+def test_global_link_and_transcript(client):
+    c, seed = client
+    tadm = _token(c, "admin@x.com")
+    ta = _token(c, "a@x.com")
+    kb = str(seed["fit_kb"].id)
+    # non-admin is denied
+    assert c.post(f"/admin/global-knowledge-bases/{kb}/sources/link",
+                  headers=_h(ta),
+                  json={"type": "note", "title": "G", "content": "x"}).status_code in (401, 403)
+    # admin note intake
+    r = c.post(f"/admin/global-knowledge-bases/{kb}/sources/link",
+               headers=_h(tadm),
+               json={"type": "note", "title": "Global note", "content": "Global facts here."})
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    assert r.json()["workspace_id"] is None
+    lst = c.get(f"/admin/global-knowledge-bases/{kb}/sources",
+                headers=_h(tadm)).json()
+    assert any(s["id"] == sid for s in lst)
+    # transcript endpoint (admin-gated, works pre-ingest)
+    tr = c.get(f"/admin/global-knowledge-bases/{kb}/sources/{sid}/transcript",
+               headers=_h(tadm))
+    assert tr.status_code == 200
+    assert c.get(f"/admin/global-knowledge-bases/{kb}/sources/{sid}/transcript",
+                 headers=_h(ta)).status_code in (401, 403)
+    # url intake requires url
+    bad = c.post(f"/admin/global-knowledge-bases/{kb}/sources/link",
+                 headers=_h(tadm),
+                 json={"type": "url", "title": "U", "url": ""})
+    assert bad.status_code == 422
+
+
 # ---------- effective model config (Agent Studio) ----------
 
 def test_resolve_agent_chat_layers(db):
@@ -509,7 +547,8 @@ def test_prompt_defaults_and_overrides(client):
     r = c.get("/admin/agent-definitions/prompts/defaults", headers=_h(tadm))
     assert r.status_code == 200, r.text
     by_key = {t["key"]: t for t in r.json()["templates"]}
-    assert set(by_key) == {"lesson_plan", "coach_chat", "study_plan"}
+    assert set(by_key) == {"lesson_plan", "coach_chat", "study_plan",
+                             "note_chat"}
     assert "chapter" in by_key["lesson_plan"]["placeholders"]
     assert by_key["coach_chat"]["default"]
     # PUT roundtrip on a definition

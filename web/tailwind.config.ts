@@ -6,7 +6,7 @@ const config = {
     container: { center: true, padding: "1rem", screens: { "2xl": "1280px" } },
     extend: {
       fontFamily: {
-        sans: ["Vazirmatn", "Tahoma", "IRANSans", "system-ui", "sans-serif"],
+        sans: ["IranYekan", "system-ui", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",

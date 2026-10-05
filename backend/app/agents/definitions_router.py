@@ -201,6 +201,32 @@ def create_global_source(kb_id: str,
     return SourceOut.model_validate(row).model_dump(mode="json")
 
 
+@global_kb_router.post("/{kb_id}/sources/link", status_code=201)
+def create_global_link(kb_id: str, body: dict,
+                       db: Session = Depends(get_db),
+                       admin: User = Depends(require_admin),
+                       storage=Depends(get_storage)):
+    """Admin-only note/url intake into a GLOBAL KB (mirrors file upload)."""
+    from app.common.base import coerce_uuid
+    from app.knowledge.schemas import SourceLinkCreate, SourceOut
+    from app.knowledge.service import create_global_link_source
+    from app.knowledge.models import KnowledgeBase
+
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == coerce_uuid(kb_id),
+                KnowledgeBase.scope == "global")
+        .first()
+    )
+    if kb is None:
+        raise HTTPException(404, "global knowledge base not found")
+    data = SourceLinkCreate.model_validate(body)
+    row = create_global_link_source(
+        db, kb, admin, data.type, data.title,
+        {"url": data.url, "content": data.content}, storage)
+    return SourceOut.model_validate(row).model_dump(mode="json")
+
+
 @global_kb_router.get("/{kb_id}/sources")
 def list_global_sources(kb_id: str, db: Session = Depends(get_db),
                         admin: User = Depends(require_admin)):
@@ -208,14 +234,37 @@ def list_global_sources(kb_id: str, db: Session = Depends(get_db),
     from app.knowledge.models import KnowledgeBase as _KB
     from app.knowledge.models import Source as _Source
     from app.knowledge.schemas import SourceOut as _SourceOut
+    from app.knowledge.service import mark_stale_ingests
 
     kb = db.query(_KB).filter(_KB.id == coerce_uuid(kb_id),
                               _KB.scope == "global").first()
     if kb is None:
         raise HTTPException(404, "global knowledge base not found")
+    mark_stale_ingests(db, None)
     rows = (db.query(_Source).filter(_Source.kb_id == kb.id)
             .order_by(_Source.created_at.desc()).all())
     return [_SourceOut.model_validate(r).model_dump(mode="json") for r in rows]
+
+
+@global_kb_router.get("/{kb_id}/sources/{source_id}/transcript")
+def get_global_source_transcript(kb_id: str, source_id: str,
+                                 db: Session = Depends(get_db),
+                                 admin: User = Depends(require_admin)):
+    """Full extracted text of a global source (admin-gated)."""
+    from app.common.base import coerce_uuid
+    from app.knowledge.models import KnowledgeBase as _KB
+    from app.knowledge.models import Source as _Source
+    from app.knowledge.service import source_transcript
+
+    kb = db.query(_KB).filter(_KB.id == coerce_uuid(kb_id),
+                              _KB.scope == "global").first()
+    if kb is None:
+        raise HTTPException(404, "global knowledge base not found")
+    src = db.query(_Source).filter(
+        _Source.id == coerce_uuid(source_id), _Source.kb_id == kb.id).first()
+    if src is None:
+        raise HTTPException(404, "source not found")
+    return source_transcript(db, src)
 
 
 @global_kb_router.get("/{kb_id}/sources/{source_id}/processing")
@@ -237,3 +286,21 @@ def get_global_source_processing(kb_id: str, source_id: str,
     if src is None:
         raise HTTPException(404, "source not found")
     return source_processing_detail(db, src)
+
+
+@global_kb_router.delete("/{kb_id}/sources/{source_id}")
+def delete_global_source(kb_id: str, source_id: str,
+                         db: Session = Depends(get_db),
+                         admin: User = Depends(require_admin),
+                         storage=Depends(get_storage)):
+    """Delete a global source + EVERYTHING it learned (ingest tree with
+    embeddings, figure/duckdb blobs, source blob). Admin-gated."""
+    from app.common.base import coerce_uuid
+    from app.knowledge.models import KnowledgeBase as _KB
+    from app.knowledge.service import delete_global_source as _delete
+
+    kb = db.query(_KB).filter(_KB.id == coerce_uuid(kb_id),
+                              _KB.scope == "global").first()
+    if kb is None:
+        raise HTTPException(404, "global knowledge base not found")
+    return _delete(db, kb, admin, source_id, storage)

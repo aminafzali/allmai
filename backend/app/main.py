@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.admin.router import router as admin_router
 from app.agents.definitions_router import global_kb_router, router as definitions_router
+from app.agents.guidance_router import router as guidance_router
 from app.agents.router import router as agents_router
 from app.agents.student.router import router as student_router
 from app.agents.teacher.router import router as teacher_router
@@ -14,12 +15,18 @@ from app.conversations.router import router as conversations_router
 from app.core.config import get_settings
 from app.knowledge.router import router as knowledge_router
 from app.memory.router import router as memory_router
+from app.usage.context import UsageTraceMiddleware
+from app.usage.router import router as usage_router
 from app.users.router import router as users_router
 from app.workspaces.router import router as workspaces_router
 
 settings = get_settings()
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0")
+
+# One trace_id per request so every usage span of a turn links together.
+# Pure ASGI (no DB/auth); workspace/user bind deeper where known.
+app.add_middleware(UsageTraceMiddleware)
 
 # Browser access: the Next.js app (and only the configured origins) may
 # call this API cross-origin. Tighten CORS_ORIGINS in production.
@@ -47,9 +54,11 @@ app.include_router(users_router)
 app.include_router(admin_router)
 app.include_router(definitions_router)
 app.include_router(global_kb_router)
+app.include_router(guidance_router)
 app.include_router(workspaces_router)
 app.include_router(knowledge_router)
 app.include_router(memory_router)
+app.include_router(usage_router)
 app.include_router(agents_router)
 app.include_router(teacher_router)
 app.include_router(student_router)

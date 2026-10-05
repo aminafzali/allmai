@@ -275,7 +275,7 @@ def test_worker_passes_admin_ocr_provider(db, monkeypatch):
     from app.ai.settings import upsert_setting
 
     w, kb = _seed(db)
-    upsert_setting(db, "ocr.provider", {"provider": "easyocr"})
+    upsert_setting(db, "ocr.provider", {"provider": "gemini"})
     st = FakeStorage()
     src = Source(id=uuid.uuid4(), workspace_id=w, kb_id=kb.id, type="pdf",
                  filename="o.pdf", storage_key="ok", status="pending")
@@ -291,7 +291,7 @@ def test_worker_passes_admin_ocr_provider(db, monkeypatch):
     monkeypatch.setattr(T, "parse_source", fake_parse)
     run_ingest(src.id, workspace_id=w, db=db, storage=st,
                embed_fn=lambda texts: [[0.01] * 1536 for _ in texts])
-    assert seen.get("ocr_provider") == "easyocr"
+    assert seen.get("ocr_provider") == "gemini"
 
 
 def test_worker_persists_parse_meta(db, monkeypatch):
@@ -482,7 +482,8 @@ def test_worker_fallback_figures_described(db, monkeypatch):
     assert res["vision"]["processed"] == 1
     img = next(c for c in db.query(Chunk).all()
                if c.chunk_metadata.get("kind") == "figure")
-    assert "میله‌ها" in img.content
+    # chunk content is Persian-normalized at ingest (ZWNJ -> space)
+    assert "میله ها" in img.content
     key = img.chunk_metadata.get("storage_key", "")
     assert key.endswith(".png") and st.get(key).startswith(b"\x89PNG")
 

@@ -108,14 +108,19 @@ def fake_embed(texts):
     return [[float(len(t) % 7)] * 1536 for t in texts]
 
 
-def test_pdf_ingest_preserves_pages(env):
+def test_pdf_ingest_preserves_pages(env, monkeypatch):
+    from app.core.config import get_settings
+
+    # Hermetic: the live Gemini route must never fire here — the
+    # structured path is covered with fakes in test_gemini_structure.py.
+    monkeypatch.setattr(get_settings(), "USE_GEMINI_PDF", False)
     db, storage, wid, kb_id = env
     blob = make_pdf(["Chemistry page one content", "Second page acids and bases"])
     src = _source(db, storage, wid, kb_id, "pdf", "book.pdf", blob)
 
     res = run_ingest(src.id, db=db, storage=storage, embed_fn=fake_embed)
     assert res["ok"] is True and res["chunks"] >= 1
-    assert res.get("parser", "fallback") == "fallback"  # USE_DOCLING off here
+    assert res.get("parser", "fallback") == "fallback"  # USE_GEMINI_PDF off here
 
     db.refresh(src)
     assert src.status == "ready"
@@ -159,7 +164,10 @@ def test_audio_ingest_preserves_timestamps(env):
     assert segs[1].start_ms == 60_000 and segs[1].end_ms == 100_000
 
 
-def test_corrupt_file_marks_failed(env):
+def test_corrupt_file_marks_failed(env, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "USE_GEMINI_PDF", False)
     db, storage, wid, kb_id = env
     src = _source(db, storage, wid, kb_id, "pdf", "broken.pdf", b"definitely not a pdf")
     res = run_ingest(src.id, db=db, storage=storage, embed_fn=fake_embed)
@@ -169,9 +177,11 @@ def test_corrupt_file_marks_failed(env):
     assert db.query(Document).filter(Document.source_id == src.id).count() == 0
 
 
-def test_reingest_replaces_previous_tree(env):
+def test_reingest_replaces_previous_tree(env, monkeypatch):
+    from app.core.config import get_settings
     from app.knowledge.models import PageSegment
 
+    monkeypatch.setattr(get_settings(), "USE_GEMINI_PDF", False)
     db, storage, wid, kb_id = env
     blob = make_pdf(["First ingest text here"])
     src = _source(db, storage, wid, kb_id, "pdf", "book.pdf", blob)
@@ -287,6 +297,8 @@ def test_transcribe_whisper_uses_mime_and_model(monkeypatch):
     seen = {}
 
     class Resp:
+        status_code = 200
+
         def raise_for_status(self):
             pass
 

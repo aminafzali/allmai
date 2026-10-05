@@ -1,7 +1,9 @@
 """Server-sent events for streaming chat (our own FastAPI -> Next.js).
 
-Frame format: `data: {json}\n\n`, terminated by `data: [DONE]`.
+Frame format: `data: {json}\\n\\n`, terminated by `data: [DONE]`.
 Event types: meta (conversation_id + citations) -> token* -> done | error.
+Client-tool turns: meta -> tool_call+ (browser executes, POSTs /chat/resume)
+-> meta -> token* -> done. At most one external tool per turn.
 """
 
 import json

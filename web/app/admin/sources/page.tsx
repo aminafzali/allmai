@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { API_BASE, api, getToken } from "@/lib/admin";
 import { FormError, KBSelect, WorkspaceSelect } from "@/components/Selectors";
 
-const FILE_TYPES = ["pdf", "docx", "pptx", "txt", "md", "image", "audio"];
+const FILE_TYPES = ["pdf", "docx", "pptx", "txt", "md", "image", "audio", "video", "excel", "csv"];
 
 export default function SourcesPage() {
   const [ws, setWs] = useState("");

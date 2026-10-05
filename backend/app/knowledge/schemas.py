@@ -27,6 +27,26 @@ class SourceLinkCreate(BaseModel):
     content: str = ""
 
 
+class SourceTextUpdate(BaseModel):
+    text: str  # manual replacement of the extracted text (re-indexed)
+
+
+class SourceReviseIn(BaseModel):
+    instruction: str  # how the AI should re-extract/revise the text
+
+
+class SuggestTitleIn(BaseModel):
+    text: str  # message / transcript text to title (capped server-side)
+
+
+class SuggestTitleOut(BaseModel):
+    title: str
+
+
+class SourceRenameIn(BaseModel):
+    title: str  # new display title (stored in sources.filename)
+
+
 class SourceOut(BaseModel):
     id: uuid.UUID
     workspace_id: uuid.UUID | None
@@ -38,6 +58,7 @@ class SourceOut(BaseModel):
     status: str
     error: str
     parse_meta: dict = {}
+    processing_started_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

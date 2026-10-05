@@ -105,6 +105,28 @@ export default function DocumentsPage() {
       setDetail(await api(`/admin/global-knowledge-bases/${gkb}/sources/${gsid}/processing`));
     } catch (e: any) { setError(String(e?.message ?? e)); }
   }
+  async function removeWorkspace() {
+    const s = sources.find((x) => x.id === sid);
+    if (!sid || !window.confirm(`«${s?.filename ?? sid}» حذف شود؟ داده‌های RAG آن هم پاک می‌شود.`)) return;
+    setError("");
+    try {
+      await api(`/workspaces/${ws}/knowledge-bases/${kb}/sources/${sid}`, { method: "DELETE" });
+      setSid("");
+      setDetail(null);
+      api(`/workspaces/${ws}/knowledge-bases/${kb}/sources`).then(setSources).catch(() => {});
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+  }
+  async function removeGlobal() {
+    const s = gsources.find((x) => x.id === gsid);
+    if (!gsid || !window.confirm(`«${s?.filename ?? gsid}» حذف شود؟ داده‌های RAG آن هم پاک می‌شود.`)) return;
+    setError("");
+    try {
+      await api(`/admin/global-knowledge-bases/${gkb}/sources/${gsid}`, { method: "DELETE" });
+      setGsid("");
+      setDetail(null);
+      api(`/admin/global-knowledge-bases/${gkb}/sources`).then(setGsources).catch(() => {});
+    } catch (e: any) { setError(String(e?.message ?? e)); }
+  }
 
   return (
     <main>
@@ -124,6 +146,9 @@ export default function DocumentsPage() {
           </select>
           <button className="rounded bg-blue-700 px-4 py-1 text-white" onClick={openWorkspace} disabled={!sid}>
             نمایش
+          </button>
+          <button className="rounded border border-red-300 px-4 py-1 text-red-600 disabled:opacity-40" onClick={removeWorkspace} disabled={!sid}>
+            حذف سند
           </button>
         </div>
       </div>
@@ -145,6 +170,9 @@ export default function DocumentsPage() {
           </select>
           <button className="rounded bg-blue-700 px-4 py-1 text-white" onClick={openGlobal} disabled={!gsid}>
             نمایش
+          </button>
+          <button className="rounded border border-red-300 px-4 py-1 text-red-600 disabled:opacity-40" onClick={removeGlobal} disabled={!gsid}>
+            حذف سند
           </button>
         </div>
       </div>

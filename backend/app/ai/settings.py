@@ -3,7 +3,8 @@
 Cheap-model defaults (verified live against GapGPT model list):
 - chat: gpt-4o-mini (cheap, good Persian)
 - embedding: text-embedding-3-small (1536d, matches chunks.embedding)
-- audio: whisper-1 (+ gapgpt/whisper-1 alias) via Transcription API only
+- audio: gpt-4o-mini-transcribe via AvalAI (live-verified 200 on both
+  json/text formats); whisper-1 via GapGPT stays panel-switchable
 Cheaper alternates the admin can switch to later: gpt-4.1-nano,
 gemini-2.5-flash-lite, deepseek-v4.1-flash.
 """
@@ -28,14 +29,37 @@ DEFAULT_AI_SETTINGS: dict[str, dict] = {
     },
     "audio.transcription": {
         "provider": "openai_compat",
-        "model": "whisper-1",
+        "model": "gpt-4o-mini-transcribe",
     },
     "agent.teacher_lesson_planner": {"model": "gemini-2.5-flash"},
     "agent.student_academic_coach": {"model": "gemini-2.5-flash"},
-    "retrieval.rerank": {"enabled": True, "method": "heuristic"},
-    # Phase 2 top-up: system-level OCR/Vision selection (Admin panel only).
-    # ocr.provider: "gemini" (DEFAULT: spike-proven on Persian) | "easyocr"
-    # (offline fallback) | "disabled" (no OCR, degraded flagged).
+    "retrieval.rerank": {"enabled": True, "method": "api", "provider": "avalai",
+                         "model": "qwen3-rerank", "timeout_s": 12,
+                         "max_chars_per_doc": 3000},
+    # Retrieval hardening (P1): single source of truth is
+    # candidates_multiplier — per-stream limit = final_k * multiplier.
+    # retrieval_top_k declares the contract for the DEFAULT final_k
+    # (8*3=24); mismatches are logged loudly, never silently absorbed.
+    # min_score=0.0: threshold infrastructure + logging only, drops nothing.
+    "retrieval.hybrid": {
+        "rrf_k": 60,
+        "candidates_multiplier": 3,
+        "retrieval_top_k": 24,
+        "default_final_k": 8,
+        "min_score": 0.0,
+        "expand_chars": 2000,
+        "query_expansion_enabled": True,
+        "ready_only": True,
+    },
+    # Structured PDF extraction (replaces Docling): Gemini Flash via the
+    # SAME OpenAI-compatible endpoint (OPENAI_COMPAT_BASE_URL, i.e. GapGPT)
+    # — no GEMINI_API_KEY needed. `model` is the GapGPT-routed Gemini id
+    # used by GeminiStructuredParser; the DB row (admin panel) wins over
+    # the ENV fallback GEMINI_STRUCT_MODEL.
+    "extraction.pdf": {"provider": "openai_compat", "model": "gemini-2.5-flash"},
+    # Page-level OCR refill for textless pages (Admin panel only).
+    # ocr.provider: "gemini" (DEFAULT: GapGPT-routed, no Google key) |
+    # "disabled" (no OCR, degraded flagged).
     # NOTE (GapGPT setup): "gemini" does NOT call Google directly — it
     # rasterizes pages and transcribes them through the SAME OpenAI-
     # compatible endpoint (OPENAI_COMPAT_BASE_URL, i.e. GapGPT) using

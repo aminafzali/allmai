@@ -45,6 +45,45 @@ class GeminiProvider:
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"unexpected Gemini response: {data!r}"[:500]) from exc
 
+    def generate_grounded(self, prompt: str, model: str | None = None, **kw) -> dict:
+        """Answer with Google Search Grounding (native Gemini REST tool).
+
+        Returns {"text", "queries", "chunks", "supports"} where chunks are
+        [{title, uri}] from groundingMetadata.groundingChunks and supports
+        map answer segments to chunk indices. Raises RuntimeError when the
+        key is missing or Google is unreachable (caller decides fallback).
+        """
+        data = self._post(
+            f"{model or get_settings().WEB_SEARCH_MODEL}:generateContent",
+            {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}],
+                "generationConfig": {
+                    "temperature": kw.get("temperature", 0.3),
+                    "maxOutputTokens": kw.get("max_tokens", 1500),
+                },
+            },
+            timeout=kw.get("timeout", 120.0),
+        )
+        try:
+            cand = data["candidates"][0]
+            text = str(cand["content"]["parts"][0].get("text") or "")
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(f"unexpected Gemini response: {data!r}"[:500]) from exc
+        meta = cand.get("groundingMetadata") or {}
+        chunks = []
+        for ch in meta.get("groundingChunks") or []:
+            web = ch.get("web") or {}
+            if web.get("uri"):
+                chunks.append({"title": web.get("title") or web["uri"],
+                               "uri": web["uri"]})
+        return {
+            "text": text,
+            "queries": list(meta.get("webSearchQueries") or []),
+            "chunks": chunks,
+            "supports": list(meta.get("groundingSupports") or []),
+        }
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []

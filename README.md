@@ -1,8 +1,9 @@
 # AllMai AI Platform
 
-Extensible AI platform (FastAPI + Celery + PostgreSQL/pgvector + Redis + MinIO,
-Next.js web app for teacher/student/admin). **No containers**: all services
-run as direct OS installs. See `ARCHITECTURE.md` for the full design.
+Extensible AI platform (FastAPI + Celery + PostgreSQL/pgvector + Redis +
+local-disk storage, Next.js web app for teacher/student/notes/admin).
+**No containers**: all services run as direct OS installs. See
+`ARCHITECTURE.md` for the full design.
 Flutter is out of scope (`mobile/` is an untouched skeleton for later).
 
 ## 1. Prerequisites (install directly on the OS)
@@ -133,6 +134,17 @@ curl 127.0.0.1:8000/workspaces/<wid>/agents/<aid>/lesson-plans -H "Authorization
 curl 127.0.0.1:8000/workspaces/<wid>/lesson-plans/by-conversation/<cid> -H "Authorization: Bearer <access>"
 ```
 
+Lead mining (enable `web_search`/`maps_search` per agent definition in
+Agent Studio first; both default OFF. Search executes in the USER'S
+BROWSER via `/chat/stream` -> `tool_call` SSE -> browser -> `/chat/resume`;
+this server never searches itself. Leads persist in the `leads` table):
+
+```bat
+curl 127.0.0.1:8000/workspaces/<wid>/leads -H "Authorization: Bearer <access>"
+curl 127.0.0.1:8000/workspaces/<wid>/leads/export?format=xlsx -H "Authorization: Bearer <access>" --output leads.xlsx
+curl -X POST 127.0.0.1:8000/workspaces/<wid>/knowledge-bases/<kb>/leads/import -H "Authorization: Bearer <access>" -H "Content-Type: application/json" -d "{\"lead_ids\":[\"<lid>\"]}"
+```
+
 ## 4. Tests
 
 ```bat
@@ -144,43 +156,71 @@ REM live Postgres RLS: pytest tests/test_rls_live.py  (needs running DB)
 
 Default suite is offline (mocked AI + fake storage + SQLite): auth/RBAC/audit,
 workspace isolation (app-layer + static RLS verification), file validation,
-ingest (real PDF/audio paths), hybrid retrieval, memory, agents (chat,
-lesson plans, coach, progress), IDOR/expired-token/frontend-hygiene security
-tests, full E2E flow. No live Postgres/Redis/MinIO required.
+ingest (Gemini-structured PDF with fakes + real PDF/audio/video/excel paths),
+hybrid retrieval + rerank seam, usage ledger (spans/pricing/summaries),
+structured image describe, audio chapters without diarization, Excel
+relations + JOIN, memory, agents (chat, lesson plans, coach, progress,
+definitions, notes), URL providers (YouTube/Instagram/Aparat),
+Excel/DuckDB, OCR/vision seams, IDOR/expired-token/frontend-hygiene
+security tests, full E2E flow. No live Postgres/Redis/MinIO required.
 
-## 5. Web (Next.js: admin + teacher + student) / Mobile (deferred)
+## 5. Web (Next.js: admin + teacher + student + notes) / Mobile (deferred)
 
 ```bat
 cd web
 npm install
-npm run dev      REM http://localhost:3000 — login at /, then /teacher, /student, /admin
-npm run build    REM production validation (22 routes)
+npm run dev      REM http://localhost:3000 — login at /, then /teacher, /student, /notes, /admin
+npm run build    REM production validation (30 routes)
 ```
 
 Admin panel (all under `/admin`, login required, admin-gated data):
 users (list + admin toggle), workspaces (create/list), knowledge-bases
-(ws-scoped CRUD), sources (upload/note/url + presigned download),
-processing (per-KB status counts), agents (create + in-panel chat test
-with citations), conversations (per-agent history), debug (full
-query→chunks→context→answer trace), ai-settings (live model editing).
-API base override: `NEXT_PUBLIC_API_BASE`.
+(ws-scoped CRUD), global-knowledge (admin KBs + assign to agent
+definitions), sources (upload/note/url + authenticated download),
+documents (per-source pipeline stages: parse/OCR/vision/chunking + figures),
+processing (status counts), agents (create + in-panel chat test with
+citations), conversations (per-agent history), agent-studio (agent
+definition editor: instructions/tools (incl. global-KB search, web search,
+maps search toggles)/model/prompts/safety/knowledge),
+debug (full query→chunks→context→answer trace), ai-settings (live model
+editing). API base override: `NEXT_PUBLIC_API_BASE`.
 
 Teacher flows (`/teacher`): home (workspace + assistants), lesson-plans
 (list from structured rows → detail from the structured endpoint with
 references), lesson-plans/new (KB/chapter/grade/duration/style → plan),
-chat (KB-grounded, conversation continuity). Student flows
+chat (KB-grounded, conversation continuity, lead table + CSV/Excel export
+when the definition enables web/maps search). Student flows
 (`/student`): home + academic profile, coach chat (persistent conversation),
 study plan (create + latest-plan view), progress (task checkboxes +
-notes). Auth guard + RTL throughout. localStorage holds only UI state
+notes). Notes flows (`/notes`): notes assistant hub (create agent), files
+(upload files/notes/links to a KB), chat (streaming, KB-grounded).
+Extraction flows (`/extraction`): dedicated data-extraction app with chat
+tab (ChatGPT-like, inline lead files per conversation) + results tab
+(lead table, CSV/Excel download, save-to-KB); backed by the
+`data_extraction_assistant` definition (web/maps tools, browser-executed).
+Guidance flows (`/guidance`): career-counselor app with chat tab,
+RIASEC personality-quiz tab (saved to memory profile) and jobs tab
+(deterministic O_NET match); backed by the `moshaver` definition.
+Auth guard + RTL throughout. localStorage holds only UI state
 (tokens, last workspace, active conversation); all data comes from the API.
 
 `mobile/` is a Flutter skeleton kept for later — the web app ships first
-and covers all teacher/student flows (see ARCHITECTURE.md § repo layout).
+and covers all teacher/student/notes flows (see ARCHITECTURE.md § repo layout).
 
 ## 6. Configuration
 
 Everything comes from root `.env` (see `.env.example`): DB/Redis/S3 endpoints,
 JWT, `AI_PROVIDER`, `OPENAI_COMPAT_BASE_URL` (default GapGPT
 `https://api.gapgpt.app/v1`, swap to `https://api.openai.com/v1` for OpenAI),
-`CHAT_MODEL`, Gemini key/model, `EMBEDDING_MODEL/DIM`, Whisper settings.
-API keys stay server-side; `GET /ai/providers` only exposes names.
+`CHAT_MODEL`, Gemini key/model, `EMBEDDING_MODEL/DIM`, Whisper settings,
+ video guards (`VIDEO_MAX_BYTES`/`VIDEO_MAX_DURATION_S`), Excel/CSV caps
+ (`EXCEL_MAX_ROWS_PER_SHEET`, `EXCEL_QUERY_*`), structured PDF extraction
+ (`USE_GEMINI_PDF`/`GEMINI_STRUCT_MODEL`/`GEMINI_STRUCT_PAGES_PER_CALL`,
+ GapGPT-routed Gemini; Docling deleted), and vision
+ (`DOCUMENT_VISION_ENABLED` + `VISION_*`). Extraction/OCR/Vision
+ provider+model selection lives in the DB (`ai_settings` keys
+ `extraction.pdf`/`ocr.provider`/`vision.provider`), editable in
+ `/admin/ai-settings`. Search backends are swappable provider chains
+(`WEB_SEARCH_PROVIDER/_FALLBACKS/_SIDE`, `PLACES_PROVIDER/_FALLBACKS`;
+default client-only, so the server never searches itself). API keys stay
+server-side; `GET /ai/providers` only exposes names.

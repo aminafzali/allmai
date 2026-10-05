@@ -18,6 +18,35 @@ const TABS = [
   { id: "instances", label: "نمونه‌ها" },
 ] as const;
 
+// راهنمای فارسی هر تب: تب فعال چه چیزی را تنظیم می‌کند.
+const TAB_GUIDES: Record<string, string> = {
+  general: "مشخصات پایه: عنوان، توضیح، دستورالعمل اصلی، نوع (agent حالت‌مند و ابزار‌دار / assistant ساده) و فعال یا غیرفعال بودن.",
+  behavior: "قوانین رفتاری (JSON) و روش‌شناسی: سبک و چارچوب پاسخ‌گویی ایجنت.",
+  capabilities: "قابلیت‌های اعلامی ایجنت (JSON) — برای مستندسازی و نمایش در UI.",
+  tools: "ابزارهای مجاز این تعریف: کدام جستجوی دانش/حافظه/اکسل در اختیار ایجنت باشد. تیک نخورده = آن قابلیت در پاسخ استفاده نمی‌شود.",
+  workflow: "گردش‌کار سفارشی (JSON). خالی یعنی همان مسیر خطی استاندارد (حافظه ← بازیابی ← پرامپت ← مدل).",
+  model: "مدل و پارامترهای همین تعریف. هر فیلد خالی یعنی ارث‌بری از تنظیم ایجنت و سپس سراسری (جدول بالا مقدار مؤثر را نشان می‌دهد).",
+  prompts: "متن قالب‌های پاسخ این ایجنت. فقط قالب‌های مرتبط با همین ایجنت نشان داده می‌شود؛ خالی یعنی پیش‌فرض داخلی موتور.",
+  safety: "قوانین ایمنی (JSON): محدودیت‌های محتوایی و رفتاری.",
+  output: "قالب خروجی (JSON): ساختار موردانتظار پاسخ.",
+  knowledge: "پایگاه‌های دانش سراسری منتسب به این تعریف. نمونه‌ها این دانش را فقط به‌صورت خواندنی به ارث می‌برند.",
+  instances: "نمونه‌های ساخته‌شده از این تعریف در ورک‌اسپیس‌ها (فقط نمایش).",
+};
+
+// کدام پرامپت برای کدام ایجنت معنا دارد. ایجنت سفارشی/ناشناخته → همه (با راهنما).
+const PROMPTS_FOR_KEY: Record<string, string[]> = {
+  teacher_lesson_planner: ["lesson_plan"],
+  student_academic_coach: ["study_plan", "coach_chat"],
+  note_taking_assistant: ["note_chat"],
+};
+
+const PROMPT_FA: Record<string, { title: string; guide: string }> = {
+  lesson_plan: { title: "طرح درس", guide: "فقط ایجنت معلم: قالب تولید طرح درس (بخش‌ها، اهداف، فعالیت‌ها) از روی زمینه بازیابی‌شده." },
+  study_plan: { title: "برنامه مطالعاتی", guide: "فقط مربی دانش‌آموز: قالب ساخت برنامه هفتگی از پروفایل و اهداف." },
+  coach_chat: { title: "گفتگوی مربی", guide: "فقط مربی دانش‌آموز: لحن و چارچوب هر جواب گفتگو (ابزارهای برنامه به‌صورت خودکار افزوده می‌شوند)." },
+  note_chat: { title: "گفتگوی دستیار یادداشت", guide: "فقط دستیار یادداشت: لحن پاسخ از روی فایل‌ها، یادداشت‌ها و لینک‌ها." },
+};
+
 // Curated model ids verified against the provider /models list. All are
 // routed through the same server-side OpenAI-compatible endpoint + key.
 const MODEL_OPTIONS = [
@@ -33,9 +62,13 @@ const MODEL_OPTIONS = [
 ];
 
 const KNOWN_TOOLS = [
-  { id: "knowledge_search", label: "جستجوی دانش ورک‌اسپیس", desc: "بازیابی چانک‌های پایگاه‌های منتسب نمونه" },
+  { id: "knowledge_search", label: "جستجوی دانش ورک‌اسپیس", desc: "بازیابی چانک‌های پایگاه‌های منتسب نمونه (فایل، یادداشت، لینک، ویدئو)" },
+  { id: "global_knowledge_search", label: "جستجوی دانش سراسری", desc: "بازیابی از پایگاه‌های سراسری منتسب به این تعریف (فقط خواندنی)" },
+  { id: "web_search", label: "جستجوی اینترنتی", desc: "پاسخ زمینه‌دار با جستجوی وب سروری (درگاه فعلی) + لینک منابع" },
+  { id: "maps_search", label: "جستجوی مکان (Maps)", desc: "نام/آدرس/امتیاز/تلفن کسب‌وکارها از Google Maps — فقط سؤال‌های مکانی" },
   { id: "memory_search", label: "جستجوی حافظه", desc: "یادآوری خاطرات مرتبط کاربر" },
   { id: "memory_facts", label: "حقایق کاربر", desc: "پروفایل و حقایق ذخیره‌شده در پرامپت" },
+  { id: "excel_query", label: "پرسش اکسل/CSV", desc: "محاسبات SUM/COUNT/AVG/GROUP BY روی شیت‌ها با DuckDB (سؤال عددی)" },
 ];
 
 const TOKEN_PRESETS = [500, 1000, 1500, 3000, 6000];
@@ -267,17 +300,31 @@ export default function DefinitionDetailPage({ params }: { params: { id: string 
       <h1 className="text-xl font-bold">{def.title || def.key}</h1>
       <p className="text-sm text-slate-500" dir="ltr">{def.key}</p>
 
-      <div className="mt-4 flex flex-wrap gap-1 border-b">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`rounded-t px-3 py-1.5 text-sm ${tab === t.id ? "bg-white font-bold text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="mt-4 flex flex-wrap gap-1 border-b" role="tablist" aria-label="بخش‌های تعریف ایجنت">
+        {TABS.map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={active}
+              title={TAB_GUIDES[t.id]}
+              onClick={() => setTab(t.id)}
+              className={`rounded-t-md border border-b-0 px-3 py-1.5 text-sm transition-colors ${
+                active
+                  ? "border-slate-300 bg-white font-bold text-blue-700 shadow-[inset_0_2px_0_0_#1d4ed8]"
+                  : "border-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </div>
+      <p className="rounded-b border border-t-0 bg-blue-50/60 px-3 py-1.5 text-xs leading-5 text-slate-600">
+        <strong className="text-blue-800">این تب چه کار می‌کند؟ </strong>
+        {TAB_GUIDES[tab]}
+      </p>
 
       <section className="rounded-b border border-t-0 bg-white p-4">
         {tab === "general" && (
@@ -308,7 +355,7 @@ export default function DefinitionDetailPage({ params }: { params: { id: string 
         {tab === "tools" && (
           <div className="space-y-2">
             <p className="text-xs text-slate-500">
-              ابزارهای مجاز این تعریف. دانش سراسریِ منتسب (تب «دانش سراسری») مستقل از این لیست، همیشه در بازیابی لحاظ می‌شود.
+              ابزارهای مجاز این تعریف. «جستجوی دانش سراسری» پایگاه‌های منتسب تب «دانش سراسری» را می‌خواند؛ اگر فقط «جستجوی دانش ورک‌اسپیس» تیک بخورد، دانش سراسری هم (سازگار با قبل) لحاظ می‌شود. «جستجوی اینترنتی» و «جستجوی مکان» در هر درخواست حداکثر یکی اجرا می‌شوند و پیش‌فرض خاموش‌اند.
             </p>
             {KNOWN_TOOLS.map((t) => {
               const list: string[] = Array.isArray(draft.tools?.tools)
@@ -345,13 +392,36 @@ export default function DefinitionDetailPage({ params }: { params: { id: string 
               متن خالی یعنی «پیش‌فرض داخلی موتور».{" "}
               <span dir="ltr" className="font-mono">{"{placeholder}"}</span>‌های استفاده‌نشده باعث بازگشت به پیش‌فرض می‌شوند — قالب خراب هیچ‌وقت پاسخ را خراب نمی‌کند.
             </p>
-            {promptDocs.map((t) => {
-              const cur: string = draft.prompt_templates?.[t.key] ?? "";
+            {(() => {
+              const relevant = PROMPTS_FOR_KEY[def.key];
+              const visible = relevant ? promptDocs.filter((t) => relevant.includes(t.key)) : promptDocs;
               return (
-                <div key={t.key} className="rounded border p-3">
+                <>
+                  {relevant && (
+                    <p className="rounded border bg-green-50 px-3 py-1.5 text-xs text-green-800">
+                      این ایجنت (<span className="font-mono" dir="ltr">{def.key}</span>) فقط از {relevant.length} قالب استفاده می‌کند؛ بقیه نمایش داده نمی‌شوند.
+                    </p>
+                  )}
+                  {!relevant && (
+                    <p className="rounded border bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+                      ایجنت سفارشی: همه قالب‌ها نمایش داده می‌شوند. فقط قالب موردنیازت را پر کن و بقیه را خالی بگذار (پیش‌فرض داخلی).
+                    </p>
+                  )}
+                  {visible.map((t) => {
+              const cur: string = draft.prompt_templates?.[t.key] ?? "";
+              const fa = PROMPT_FA[t.key];
+              const overridden = cur !== "";
+              return (
+                <div key={t.key} className={`rounded border p-3 ${overridden ? "border-blue-300 bg-blue-50/40" : ""}`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-bold" dir="ltr">{t.key}</h3>
-                    <span className="text-xs text-slate-500">{t.description}</span>
+                    <h3 className="text-sm font-bold">
+                      {fa ? fa.title : t.key}{" "}
+                      <span className="font-mono font-normal text-xs text-slate-400" dir="ltr">{t.key}</span>
+                      {overridden && (
+                        <span className="mr-2 rounded bg-blue-700 px-2 py-0.5 text-[11px] font-normal text-white">سفارشی‌شده</span>
+                      )}
+                    </h3>
+                    <span className="text-xs text-slate-500">{fa ? fa.guide : t.description}</span>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {(t.placeholders ?? []).map((p: string) => (
@@ -401,6 +471,9 @@ export default function DefinitionDetailPage({ params }: { params: { id: string 
                 </div>
               );
             })}
+                </>
+              );
+            })()}
           </div>
         )}
         {tab === "safety" && (<JsonArea value={draft.safety_rules} onChange={(v) => setDraft((d: any) => ({ ...d, safety_rules: v }))} />)}
@@ -423,7 +496,13 @@ export default function DefinitionDetailPage({ params }: { params: { id: string 
                   </button>
                 </li>
               ))}
-              {allGlobal.length === 0 && <p className="text-sm text-slate-400">پایگاه سراسری وجود ندارد.</p>}
+              {allGlobal.length === 0 && (
+                <p className="text-sm text-slate-400">
+                  پایگاه سراسری وجود ندارد — از بخش{" "}
+                  <a className="text-blue-700 hover:underline" href="/admin/global-knowledge">پایگاه‌های دانش سراسری</a>{" "}
+                  بساز.
+                </p>
+              )}
             </ul>
           </div>
         )}

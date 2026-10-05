@@ -50,8 +50,37 @@ def _split_words(text: str, page_no: int | None,
     return chunks
 
 
-def _split_audio(pages) -> list[ChunkDraft]:
+def _chapter_for(chapters, win_start: int) -> dict | None:
+    """Chapter containing a window start (chapters sorted by start_ms)."""
+    hit = None
+    for ch in chapters or []:
+        try:
+            start = int(ch.get("start_ms", 0))
+        except (TypeError, ValueError):
+            continue
+        if start <= (win_start or 0):
+            hit = ch
+        else:
+            break
+    return hit
+
+
+def _split_audio(pages, chapters=None) -> list[ChunkDraft]:
+    """Merge transcript pages into ~45s windows, stamping each window
+    with its chapter (section metadata) so RAG cites سرفصل + timestamp."""
     chunks: list[ChunkDraft] = []
+
+    def _emit(buf, win_start, win_end):
+        content = " ".join(buf)
+        meta: dict = {"kind": "transcript"}
+        ch = _chapter_for(chapters, win_start or 0)
+        if ch:
+            meta["section"] = str(ch.get("title", ""))
+            meta["chapter_start_ms"] = int(ch.get("start_ms", 0) or 0)
+        chunks.append(ChunkDraft(text=content, tokens=int(len(content.split()) * 1.3),
+                                 start_ms=win_start, end_ms=win_end,
+                                 metadata=meta))
+
     buf: list[str] = []
     win_start: int | None = None
     win_end: int | None = None
@@ -63,26 +92,57 @@ def _split_audio(pages) -> list[ChunkDraft]:
         buf.append(p.text.strip())
         win_end = p.end_ms or win_start
         if win_end - (win_start or 0) >= AUDIO_WINDOW_MS:
-            content = " ".join(buf)
-            chunks.append(ChunkDraft(text=content, tokens=int(len(content.split()) * 1.3),
-                                     start_ms=win_start, end_ms=win_end))
+            _emit(buf, win_start, win_end)
             buf, win_start, win_end = [], None, None
     if buf:
-        content = " ".join(buf)
-        chunks.append(ChunkDraft(text=content, tokens=int(len(content.split()) * 1.3),
-                                 start_ms=win_start or 0, end_ms=win_end or 0))
+        _emit(buf, win_start or 0, win_end or 0)
     return chunks
+
+
+def _audio_chapters(doc) -> list[dict]:
+    """Chapter dicts from parsed chapter elements (metadata-carried)."""
+    out = []
+    for el in getattr(doc, "elements", None) or []:
+        meta = getattr(el, "metadata", None) or {}
+        if meta.get("kind") != "chapter":
+            continue
+        try:
+            out.append({"start_ms": int(meta.get("start_ms", 0) or 0),
+                        "end_ms": int(meta.get("end_ms", 0) or 0),
+                        "title": str(meta.get("title", "") or "")})
+        except (TypeError, ValueError):
+            continue
+    return sorted(out, key=lambda c: c["start_ms"])
 
 
 def chunk_parsed(doc: ParsedDocument, is_audio: bool = False) -> list[ChunkDraft]:
     if is_audio:
-        return _split_audio(doc.pages)
-    if getattr(doc, "elements", None):
-        return _split_elements(doc.elements)
-    out: list[ChunkDraft] = []
-    for page in doc.pages:
-        out.extend(_split_words(page.text, page.page_no))
-    return out
+        drafts = _split_audio(doc.pages, _audio_chapters(doc))
+    elif getattr(doc, "elements", None):
+        drafts = _split_elements(doc.elements)
+    else:
+        # Timestamped transcript pages from non-audio sources (e.g. URL video
+        # transcripts) merge into time windows exactly like audio, so
+        # start_ms/end_ms survive to citations. Plain text pages chunk by words.
+        timed = [p for p in doc.pages if (p.text or "").strip()]
+        if timed and all(p.start_ms is not None and p.end_ms is not None
+                         for p in timed):
+            drafts = _split_audio(doc.pages, _audio_chapters(doc))
+        else:
+            drafts = []
+            for page in doc.pages:
+                drafts.extend(_split_words(page.text, page.page_no))
+    # Locked invariant (see normalize: "never index empty content"): no
+    # blank draft may reach embedding — strict providers 400 the WHOLE
+    # batch on a single empty input, failing an otherwise healthy source.
+    kept = [d for d in drafts if (d.text or "").strip()]
+    dropped = len(drafts) - len(kept)
+    if dropped:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "chunking dropped %d blank drafts", dropped)
+    return kept
 
 
 def pdf_figure_drafts(blob: bytes, max_figures: int = 5,

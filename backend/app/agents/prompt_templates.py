@@ -10,6 +10,7 @@ Template keys (stable contract, shown in Studio):
 - lesson_plan : teacher lesson-plan generation
 - study_plan  : student study-plan generation
 - coach_chat  : student coach chat preamble
+- note_chat   : note-taking assistant chat preamble
 """
 
 import re
@@ -76,12 +77,27 @@ TEMPLATE_DOCS = {
         "placeholders": ["profile", "goals", "plan", "memories",
                          "context", "history", "message"],
     },
+    "note_chat": {
+        "description": "Note-taking assistant chat preamble",
+        "placeholders": ["facts", "memories", "context", "history",
+                         "message"],
+    },
 }
+
+NOTE_CHAT_DEFAULT = (
+    "You are a helpful study-notes assistant. Answer in Persian, concretely.\n"
+    "Known about the user:\n{facts}\n"
+    "Relevant memories:\n{memories}\n"
+    "Reference material (files, notes, links):\n{context}\n"
+    "History:\n{history}\n"
+    "Student: {message}\nAssistant:"
+)
 
 DEFAULTS = {
     "lesson_plan": LESSON_PLAN_DEFAULT,
     "study_plan": STUDY_PLAN_DEFAULT,
     "coach_chat": COACH_CHAT_DEFAULT,
+    "note_chat": NOTE_CHAT_DEFAULT,
 }
 
 

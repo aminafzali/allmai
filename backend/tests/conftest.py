@@ -20,3 +20,27 @@ def _reset_rate_limits():
     reset()
     yield
     reset()
+
+
+@pytest.fixture(autouse=True)
+def _pin_legacy_reranker(monkeypatch):
+    """Hermetic suite: live API reranking must never fire in unit tests.
+
+    Production default is api/avalai; tests pin the deterministic legacy
+    heuristic so ranking assertions stay stable and offline. The new
+    contract (none/api/local explicitly) is covered by dedicated tests
+    that control settings themselves.
+    """
+    import app.ai.settings as _S
+
+    _real = _S.list_settings
+
+    def _ls(db=None):
+        try:
+            merged = dict(_real(db))
+        except Exception:
+            merged = {}
+        merged["retrieval.rerank"] = {"method": "heuristic"}
+        return merged
+
+    monkeypatch.setattr(_S, "list_settings", _ls)

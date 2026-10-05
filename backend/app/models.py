@@ -8,6 +8,7 @@ from app.agents.definitions_models import (  # noqa: F401
     AgentKnowledgeAssignment,
 )
 from app.agents.models import Agent  # noqa: F401
+from app.agents.lead_models import Lead  # noqa: F401
 from app.agents.teacher.models import LessonPlan  # noqa: F401
 from app.auth.models import RefreshToken  # noqa: F401
 from app.common.audit import AuditLog  # noqa: F401
@@ -22,5 +23,6 @@ from app.knowledge.models import (  # noqa: F401
     Source,
 )
 from app.memory.models import ConversationSummary, MemoryFact  # noqa: F401
+from app.usage.models import UsageEvent  # noqa: F401
 from app.users.models import User  # noqa: F401
 from app.workspaces.models import Workspace, WorkspaceMember  # noqa: F401

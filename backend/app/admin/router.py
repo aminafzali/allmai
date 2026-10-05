@@ -11,6 +11,36 @@ from app.users.models import User
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+@router.get("/worker-status")
+def read_worker_status(db: Session = Depends(get_db),
+                       admin: User = Depends(require_admin)):
+    """Ingestion worker liveness for the admin panel: queue depth +
+    worker ping. Never raises (unknowns are reported, not errors)."""
+    import redis as _redis
+
+    from app.core.config import get_settings
+
+    s = get_settings()
+    queue_len: int | None = None
+    try:
+        queue_len = int(_redis.Redis.from_url(
+            s.CELERY_BROKER_URL).llen("celery"))
+    except Exception:
+        queue_len = None
+    alive, active = False, 0
+    try:
+        from workers.celery_app import celery as _celery
+
+        ping = _celery.control.inspect(timeout=2.0).ping() or {}
+        alive = bool(ping)
+        stats = _celery.control.inspect(timeout=2.0).active() or {}
+        active = sum(len(v) for v in stats.values())
+    except Exception:
+        alive, active = False, 0
+    return {"queue_len": queue_len, "worker_alive": alive,
+            "active_tasks": active}
+
+
 @router.get("/ai-settings")
 def read_ai_settings(
     db: Session = Depends(get_db), admin: User = Depends(require_admin)

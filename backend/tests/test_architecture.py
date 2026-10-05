@@ -1,9 +1,11 @@
 """Architecture conformance: vendors stay behind our abstractions.
 
-- RAG-Anything: importable only inside app/knowledge/parsers/
+- Docling/RAG-Anything/LightRAG: REMOVED from the extraction path —
+  forbidden everywhere (structured extraction is Gemini Flash via
+  GapGPT + deterministic local parsers).
 - LangGraph: only inside app/agents/runtime/
 - Zep: NOT used in MVP (interface + Postgres provider only)
-- Video: rejected, never processed
+- Video: audio-track transcription only (no frame analysis)
 """
 
 from pathlib import Path
@@ -30,22 +32,18 @@ def test_no_vendor_imports_outside_adapters():
     for path in _py_files(APP):
         text = path.read_text(encoding="utf-8", errors="ignore")
         rel = path.relative_to(APP).as_posix()
-        if "raganything" in text and not rel.startswith("knowledge/parsers/"):
-            violations.append(f"{rel}: raganything")
-        if "raganything" in text and rel.startswith("knowledge/parsers/"):
-            # Full-engine USAGE (imports/calls) is forbidden; merely naming
-            # these paths in docstrings/comments is allowed and intended.
-            for banned in ("raganything.raganything",
-                           "from raganything import RAGAnything",
-                           "process_document_complete(",
-                           "insert_content_list(", "ainsert(", "aquery("):
-                if banned in text:
-                    violations.append(f"{rel}: full-engine {banned}")
+        # Docling/RAG-Anything/EasyOCR were deleted: any import or
+        # attribute usage anywhere in app/ is a regression (the old
+        # parsers/ exception is gone). Plain historical mentions in
+        # comments/docstrings ("X was removed") are allowed.
+        if re.search(r"(?<![\w.])(import docling|from docling|docling\.)", text):
+            violations.append(f"{rel}: docling (removed)")
+        if re.search(r"(?<![\w.])(import raganything|from raganything|raganything\.)", text):
+            violations.append(f"{rel}: raganything (removed)")
+        if re.search(r"(?<![\w.])(import easyocr|from easyocr|easyocr\.)", text):
+            violations.append(f"{rel}: easyocr (removed)")
         if re.search(r"(?<![\w.])(import lightrag|from lightrag|lightrag\.)", text):
-            violations.append(f"{rel}: lightrag (Phase 2 is parse-only)")
-        if re.search(r"(?<![\w.])(import docling|from docling)(?![\w.])", text):
-            if not rel.startswith("knowledge/parsers/"):
-                violations.append(f"{rel}: docling")
+            violations.append(f"{rel}: lightrag (removed with Docling)")
         # SDK imports only (our own agents/runtime/* module path is fine)
         if re.search(r"(?<![\w.])(import langgraph|from langgraph)(?![\w.])", text):
             if not rel.startswith("agents/runtime/"):
@@ -55,10 +53,17 @@ def test_no_vendor_imports_outside_adapters():
     assert violations == []
 
 
-def test_video_rejected_and_audio_guarded():
-    assert "video" not in SOURCE_TYPES
+def test_video_accepted_and_audio_guarded():
+    # Video = audio-track transcription only (mp4/webm/mov); unknown types
+    # and mismatched extensions are still rejected loudly.
+    assert "video" in SOURCE_TYPES
+    assert "excel" in SOURCE_TYPES
+    assert "csv" in SOURCE_TYPES
+    assert validate_source_type("video", "clip.mp4") == "video"
+    assert validate_source_type("excel", "data.xlsx") == "excel"
+    assert validate_source_type("csv", "data.csv") == "csv"
     with pytest.raises(UnsupportedSourceError):
-        validate_source_type("video")
+        validate_source_type("video", "clip.avi")
     with pytest.raises(UnsupportedSourceError):
         validate_source_type("camembert")
     with pytest.raises(UnsupportedSourceError):

@@ -156,7 +156,7 @@ def test_rerank_seam_reorders(db):
     seed = _seed(db)
     hits = hybrid_search(db, seed["wa"], "acids", top_k=3,
                          query_vector=[1.0, 0.0, 0.0, 0.0],
-                         rerank_fn=lambda q, hs: list(reversed(hs)))
+                         rerank_fn=lambda q, hs, top_k=None: list(reversed(hs)))
     assert hits[0].chunk.content != "acids donate protons in water"
 
 
@@ -196,3 +196,202 @@ def test_debug_trace_and_role_gate(client, db):
     ok = c.post(f"/workspaces/{wa}/knowledge/search",
                 json={"query": "acids"}, headers=_h(tm))
     assert ok.status_code == 200
+
+
+# ---------- P1: hardening contract + reranker seam ----------
+
+def _cfg(monkeypatch, hybrid=None, rerank=None):
+    import app.ai.settings as S
+
+    def _ls(db=None):
+        d = {}
+        if hybrid is not None:
+            d["retrieval.hybrid"] = hybrid
+        if rerank is not None:
+            d["retrieval.rerank"] = rerank
+        return d
+
+    monkeypatch.setattr(S, "list_settings", _ls)
+
+
+def test_resolve_limits_single_source_of_truth(caplog):
+    from app.knowledge.retrieval.hybrid import _hybrid_cfg, _resolve_limits
+
+    assert _resolve_limits(4, _hybrid_cfg(None)) == (4, 12)
+    assert _resolve_limits(None, _hybrid_cfg(None)) == (8, 24)
+    bad = dict(_hybrid_cfg(None), retrieval_top_k=99)
+    with caplog.at_level("WARNING", logger="app.knowledge.retrieval.hybrid"):
+        assert _resolve_limits(None, bad) == (8, 24)  # computed wins, loudly
+    assert "inconsistent" in caplog.text
+
+
+def test_threshold_zero_drops_nothing_high_drops_weak(db, monkeypatch):
+    from app.knowledge.retrieval.hybrid import hybrid_search as hs
+
+    seed = _seed(db)
+    base = hs(db, seed["wa"], "acids", top_k=5, kb_id=seed["k1"],
+              query_vector=[1.0, 0.0, 0.0, 0.0], rerank_fn=None)
+    assert base, "baseline must return hits"
+    _cfg(monkeypatch, hybrid={"min_score": 0.99})
+    thin = hs(db, seed["wa"], "acids", top_k=5, kb_id=seed["k1"],
+              query_vector=[1.0, 0.0, 0.0, 0.0], rerank_fn=None)
+    assert len(thin) < len(base)
+
+
+def test_ready_only_filter_default(db, monkeypatch):
+    from app.knowledge.retrieval.hybrid import hybrid_search as hs
+
+    seed = _seed(db)
+    src = Source(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                 type="note", filename="pending-note", status="processing")
+    db.add(src)
+    db.flush()
+    doc = Document(id=uuid.uuid4(), workspace_id=seed["wa"], source_id=src.id, title="p")
+    db.add(doc)
+    db.flush()
+    seg = PageSegment(id=uuid.uuid4(), workspace_id=seed["wa"], document_id=doc.id,
+                      text="acids in citrus fruits overview")
+    db.add(seg)
+    db.flush()
+    db.add(Chunk(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                 segment_id=seg.id, content="acids in citrus fruits overview",
+                 tokens=5, embedding=[1.0, 0.0, 0.0, 0.0], chunk_metadata={}))
+    db.commit()
+    qv = [1.0, 0.0, 0.0, 0.0]
+    kw = dict(top_k=8, kb_id=seed["k1"], query_vector=qv, rerank_fn=None)
+    assert "pending-note" not in [h.source.filename for h in hs(db, seed["wa"], "acids", **kw)]
+    _cfg(monkeypatch, hybrid={"ready_only": False})
+    assert "pending-note" in [h.source.filename for h in hs(db, seed["wa"], "acids", **kw)]
+
+
+def test_content_dedup_collapses_reingested_copies(db):
+    from app.knowledge.retrieval.hybrid import hybrid_search as hs
+
+    seed = _seed(db)
+    for i in range(2):
+        src = Source(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                     type="note", filename=f"copy{i}", status="ready")
+        db.add(src)
+        db.flush()
+        doc = Document(id=uuid.uuid4(), workspace_id=seed["wa"], source_id=src.id, title="c")
+        db.add(doc)
+        db.flush()
+        seg = PageSegment(id=uuid.uuid4(), workspace_id=seed["wa"], document_id=doc.id,
+                          text="acids donate protons in water")
+        db.add(seg)
+        db.flush()
+        db.add(Chunk(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                     segment_id=seg.id, content="acids donate protons in water",
+                     tokens=5, embedding=[1.0, 0.0, 0.0, 0.0], chunk_metadata={}))
+    db.commit()
+    hits = hs(db, seed["wa"], "acids", top_k=8, kb_id=seed["k1"],
+              query_vector=[1.0, 0.0, 0.0, 0.0], rerank_fn=None)
+    texts = [h.chunk.content for h in hits]
+    assert texts.count("acids donate protons in water") == 1
+
+
+def test_parent_heading_prefixed_for_table_hit(db):
+    from types import SimpleNamespace
+
+    from app.knowledge.retrieval.passages import expand_hit_texts
+
+    seed = _seed(db)
+    src = Source(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                 type="pdf", filename="s.pdf", status="ready")
+    db.add(src)
+    db.flush()
+    doc = Document(id=uuid.uuid4(), workspace_id=seed["wa"], source_id=src.id, title="s")
+    db.add(doc)
+    db.flush()
+    seg1 = PageSegment(id=uuid.uuid4(), workspace_id=seed["wa"], document_id=doc.id,
+                       text="sec", page_no=1)
+    seg2 = PageSegment(id=uuid.uuid4(), workspace_id=seed["wa"], document_id=doc.id,
+                       text="sec", page_no=2)
+    seg3 = PageSegment(id=uuid.uuid4(), workspace_id=seed["wa"], document_id=doc.id,
+                       text="sec", page_no=3)
+    db.add_all([seg1, seg2, seg3])
+    db.flush()
+    head = Chunk(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                 segment_id=seg1.id, content="واکنش‌های شیمیایی", tokens=3,
+                 embedding=[0.0] * 4,
+                 chunk_metadata={"kind": "heading", "element_id": "e1"})
+    filler = Chunk(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                   segment_id=seg2.id, content="متن میانی", tokens=3,
+                   embedding=[0.0] * 4,
+                   chunk_metadata={"kind": "paragraph", "element_id": "e9"})
+    tbl = Chunk(id=uuid.uuid4(), workspace_id=seed["wa"], kb_id=seed["k1"],
+                segment_id=seg3.id, content="| a | b |", tokens=3,
+                embedding=[0.0] * 4,
+                chunk_metadata={"kind": "table", "element_id": "e2",
+                                "parent_id": "e1", "section": "واکنش‌های شیمیایی"})
+    db.add_all([head, filler, tbl])
+    db.commit()
+    hit = SimpleNamespace(chunk=tbl, segment=seg3, source=src, score=0.5)
+    expanded = expand_hit_texts(db, [hit])
+    assert expanded[str(tbl.id)].startswith("[واکنش‌های شیمیایی]")
+
+
+def test_rerank_none_and_unknown_disable(monkeypatch):
+    from app.knowledge.retrieval.rerank import get_rerank_fn
+
+    _cfg(monkeypatch, rerank={"method": "none"})
+    assert get_rerank_fn(None) is None
+    _cfg(monkeypatch, rerank={"method": "bogus"})
+    assert get_rerank_fn(None) is None
+
+
+def test_avalai_adapter_maps_by_id_threads_top_n_and_fails_open(monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+
+    from app.knowledge.retrieval.rerank import AvalAIReranker
+
+    def _hit(cid, text):
+        chunk = SimpleNamespace(id=cid, content=text)
+        return SimpleNamespace(chunk=chunk, source=None, score=0.01)
+
+    hits = [_hit("c1", "one"), _hit("c2", "two"), _hit("c3", "three")]
+    seen = {}
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            # live deployment shape: `data` key, index mapping, no id echo
+            return {"data": [
+                {"index": 2, "relevance_score": 0.9},
+                {"index": 0, "relevance_score": 0.1},
+            ]}
+
+    def _fake_post(url, json=None, headers=None, timeout=None):
+        seen.update(url=url, payload=json)
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "post", _fake_post)
+    fn = AvalAIReranker(model="qwen3-rerank", base_url="https://x",
+                        api_key="k", timeout_s=5)
+    out = fn("q", hits, top_k=2)
+    assert seen["url"] == "https://x/rerank"
+    assert seen["payload"]["model"] == "qwen3-rerank"
+    assert seen["payload"]["top_n"] == 2
+    assert seen["payload"]["documents"] == ["one", "two", "three"]
+    assert [h.chunk.id for h in out] == ["c3", "c1"]  # mapped by index, cut to final_k
+    assert out[0].rerank_score == 0.9
+
+    def _boom(*a, **k):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(httpx, "post", _boom)
+    assert fn("q", hits, top_k=2) == hits  # fail-open keeps fused order
+    assert AvalAIReranker(api_key="")("q", hits) == hits  # no key, no HTTP
+
+
+def test_local_reranker_fail_closed():
+    from app.knowledge.retrieval.rerank import LocalReranker
+
+    import pytest
+
+    with pytest.raises(NotImplementedError):
+        LocalReranker()("q", [])

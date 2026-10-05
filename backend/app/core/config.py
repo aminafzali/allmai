@@ -51,29 +51,104 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.0-flash"
 
+    # --- Agent search tools (per-definition toggles in Agent Studio,
+    # default OFF; admin enables + provides keys) ---
+    # web_search backend: Gemini + Google Search Grounding (direct Google
+    # REST, same pattern as GeminiProvider; needs GEMINI_API_KEY).
+    WEB_SEARCH_MODEL: str = "gemini-2.5-flash"
+    # maps_search backend: Google Maps Platform Places API (New) Text
+    # Search. Needs a key with Places API enabled (Google-side billing).
+    GOOGLE_MAPS_API_KEY: str = ""
+
+    # --- Search provider chains (swappable backends, see ai/*_providers) ---
+    # web_search DEFAULT is GapGPT (Responses API + web_search tool,
+    # proven live): same trust domain + billing as every chat call, no new
+    # keys. Browser DDG is unreachable from Iranian networks, so the
+    # client-side web path is currently dead (kept as selectable impl).
+    WEB_SEARCH_PROVIDER: str = "gapgpt"
+    WEB_SEARCH_FALLBACKS: str = "ddg"
+    WEB_SEARCH_SIDE: str = "server"  # client | server
+    GAPGPT_SEARCH_MODEL: str = "gpt-4o-mini"
+    # maps_search DEFAULT is browser-first Overpass (no keys, no cost);
+    # overpass-server runs only when the browser fails (resume remainder).
+    PLACES_PROVIDER: str = "overpass"
+    PLACES_FALLBACKS: str = "overpass-server"  # + "google-places" (needs key)
+
     # --- Embeddings (swappable; DIM must match chunks.embedding) ---
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     EMBEDDING_DIM: int = 1536
 
     # --- Audio (transcription API only; no local models in MVP) ---
-    WHISPER_API_MODEL: str = "whisper-1"
+    # Transcription model selector (also the ENV fallback under the
+    # panel-editable `audio.transcription` ai_setting; the DB row wins).
+    # - "gpt-4o-mini-transcribe" (DEFAULT): AvalAI route below.
+    # - "whisper-1": GapGPT /audio/transcriptions (kept, panel-switchable).
+    # - "gemini-*": Gemini-via-GapGPT chat with audio input.
+    WHISPER_API_MODEL: str = "gpt-4o-mini-transcribe"
+    # AvalAI OpenAI-compatible gateway (transcription only for now).
+    # Docs: https://docs.avalai.ir/fa/ (audio/transcriptions, Bearer key).
+    AVALAI_BASE_URL: str = "https://api.avalai.ir/v1"
+    AVALAI_API_KEY: str = ""
+    # Per-request payload cap of the transcription endpoint (~25MB on both
+    # gateways): longer audio is split into pieces (timestamps shifted).
+    WHISPER_MAX_BYTES: int = 24 * 1024 * 1024
+    # Transcription retries on 429/5xx (honors Retry-After, capped).
+    TRANSCRIBE_MAX_RETRIES: int = 3
+    TRANSCRIBE_RETRY_CAP_S: float = 20.0
+
+    # --- Video (audio-track transcription only, via imageio-ffmpeg) ---
+    # Pre-ingest guards, both tunable without code changes. Oversized or
+    # over-long videos are rejected loudly instead of stalling the worker.
+    VIDEO_MAX_BYTES: int = 100 * 1024 * 1024
+    VIDEO_MAX_DURATION_S: int = 1200  # 20 minutes
+    # Audio extraction shape: mono 16kHz mp3 (small, whisper-friendly).
+    VIDEO_AUDIO_BITRATE: str = "32k"
+
+    # --- Excel (structured sheets via DuckDB, see knowledge/excel/) ---
+    # Hard row cap per sheet: ingesting more is rejected loudly (memory bound).
+    EXCEL_MAX_ROWS_PER_SHEET: int = 200_000
+    EXCEL_MAX_SHEETS: int = 50
+    # Query guardrails for excel_query (agent tool).
+    EXCEL_QUERY_MAX_ROWS: int = 200
+    EXCEL_QUERY_TIMEOUT_S: int = 15
 
     # --- Ingestion ---
-    USE_RAGANYTHING: bool = False
+    # Structured PDF extraction route: Gemini Flash via GapGPT
+    # (GeminiStructuredParser). Docling/RAG-Anything were removed from the
+    # extraction path entirely; the flat pypdf fallback stays as the loud
+    # safety net when Gemini is unreachable.
+    USE_GEMINI_PDF: bool = True
+    # GapGPT-routed model id for structured PDF extraction (overridden by
+    # the `extraction.pdf` ai_setting row when the admin sets one).
+    GEMINI_STRUCT_MODEL: str = "gemini-2.5-flash"
+    # How many text-rich pages go into ONE structuring call (cost/latency
+    # knob: a 200-page book needs ~40 calls at 5 pages each).
+    GEMINI_STRUCT_PAGES_PER_CALL: int = 5
+    # Per-call timeout for structuring/vision calls (seconds).
+    GEMINI_STRUCT_TIMEOUT_S: float = 120.0
+    # Loud guard: PDFs with more pages are rejected instead of burning
+    # unbounded model budget (tunable, never silent truncation).
+    GEMINI_STRUCT_MAX_PAGES: int = 300
+    # Stuck-task watchdog: processing/pending rows older than this (minutes)
+    # are marked failed with a retry hint on list reads (no cron needed).
+    INGEST_STALE_MINUTES: int = 30
+    # Liveness heartbeat during long parses (seconds): the worker refreshes
+    # processing_started_at on its own session so slow-but-alive runs are
+    # distinguishable from dead workers. 0 disables.
+    INGEST_HEARTBEAT_S: int = 120
+    # Orphan reset at worker start (seconds): processing rows older than
+    # this are presumed ownerless (no live task can legally run longer
+    # than DOCUMENT_PROCESSING_TIMEOUT + slack) and go back to pending.
+    INGEST_ORPHAN_S: int = 2400
 
-    # --- Phase 2 Document Core ---
-    # USE_DOCLING: route PDFs through the RAG-Anything parser subsystem
-    # (get_parser("docling"), parse-only). Default off: pypdf fallback stays.
-    USE_DOCLING: bool = False
+    # --- Document extraction (Docling/RAG-Anything removed) ---
     # Worker shape for heavy documents: one at a time by default.
     # No hard limits in code; Celery reads these (see workers/celery_app.py).
     DOCUMENT_PROCESSING_CONCURRENCY: int = 1
     DOCUMENT_PROCESSING_TIMEOUT: int = 1800
-    # Comma-separated OCR languages for the Persian-OCR refill pass
-    # (EasyOCR codes; 'fa' is mandatory — see spike report).
-    DOC_OCR_LANGS: str = "fa"
-    # Scanned-PDF early detect: average extractable chars per page below
-    # this threshold means "no usable text layer" (configurable, not hardcoded).
+    # Page classifier: average extractable chars per page below this
+    # threshold means "no usable text layer" -> the page goes through
+    # Gemini vision instead of text structuring (configurable, not hardcoded).
     SCAN_TEXT_THRESHOLD: int = 20
     # --- Phase 3 Vision (D): triage thresholds, all configurable ---
     DOCUMENT_VISION_ENABLED: bool = False

@@ -16,6 +16,11 @@ export default function ProcessingPage() {
   const [kb, setKb] = useState("");
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState("");
+  const [worker, setWorker] = useState<any | null>(null);
+
+  useEffect(() => {
+    api("/admin/worker-status").then(setWorker).catch(() => {});
+  }, []);
 
   const reload = () => {
     if (ws && kb)
@@ -34,6 +39,16 @@ export default function ProcessingPage() {
   return (
     <main>
       <h1 className="text-xl font-bold">وضعیت پردازش</h1>
+      {worker && (
+        <p className="mt-2 text-sm">
+          ورکر:{" "}
+          <strong className={worker.worker_alive ? "text-green-700" : "text-red-700"}>
+            {worker.worker_alive ? "فعال" : "خاموش/نامشخص"}
+          </strong>
+          {" · "}صف: {worker.queue_len ?? "؟"}
+          {worker.active_tasks ? ` · مشغول: ${worker.active_tasks}` : ""}
+        </p>
+      )}
       <div className="mt-4 flex gap-2">
         <WorkspaceSelect value={ws} onChange={(v) => { setWs(v); setKb(""); }} />
         <KBSelect wsId={ws} value={kb} onChange={setKb} />

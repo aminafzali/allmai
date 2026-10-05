@@ -1,0 +1,20 @@
+{"question": "سایت مشاوره تحصیلی که در ابتدای کتاب معرفی شده چیست؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["هیوا"], "type": "factual"}
+{"question": "بخش «ساختار اتم و رفتار آن» زیرمجموعه کدام بخش است؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["آرایش الکترونی", "ظرفیت"], "type": "multi"}
+{"question": "جدول عنصرها شامل کدام عنصرها می‌شود؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["هیدروژن", "نیتروژن", "اکسیژن"], "type": "factual"}
+{"question": "معادل انگلیسی غنی‌سازی ایزوتوپی در کتاب چیست؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["Isotopic Enrichment"], "type": "precise"}
+{"question": "در جدول ساعت شبانه‌روز، دمای مورد (الف) چند درجه است؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["5", "الف"], "type": "precise"}
+{"question": "طبقه‌بندی عنصرها و آرایش الکترونی در کدام بخش‌ها آمده‌اند؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["طبقه‌بندی عنصرها", "آرایش الکترونی"], "type": "multi"}
+{"question": "عنوان جدول مربوط به تشکیل مولکول‌های اکسیژن و آب چیست؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["مولکول", "اکسیژن", "آب"], "type": "caption"}
+{"question": "بخش «خود را بیازمایید» در کدام قسمت کتاب آمده است؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["خود را بیازمایید"], "type": "factual"}
+{"question": "آیا کتاب شیمی دهم فصل مستقلی درباره اسیدها و بازها دارد؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["فصل", "فهرست"], "type": "adversarial"}
+{"question": "کاوش کنید در کدام بخش کتاب آمده است؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shimi.pdf"], "expected_keywords": ["کاوش کنید"], "type": "factual"}
+{"question": "سرفصل‌های کتاب شناخت در ابتدای متن چه نام دارند؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shenakht.docx"], "expected_keywords": ["نقطه", "مرجع", "اصول"], "type": "factual"}
+{"question": "اصل روش تعریف در تئوری شناخت چیست؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shenakht.docx"], "expected_keywords": ["خصوصیات", "معرفی"], "type": "factual"}
+{"question": "خبر از خود و فعل خبر از حرکت چه تفاوتی دارند؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shenakht.docx"], "expected_keywords": ["خبر", "حرکت"], "type": "multi"}
+{"question": "مثال هوشنگ بر درخت پرتقال چه نکته‌ای را می‌رساند؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shenakht.docx"], "expected_keywords": ["هوشنگ", "پرتقال"], "type": "factual"}
+{"question": "نکته تکمیلی ۲ درباره روش علمی جدید چه می‌گوید؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shenakht.docx"], "expected_keywords": ["استقرایی", "آزمایش"], "type": "precise"}
+{"question": "آیا تئوری شناخت درباره علم شیمی صحبت می‌کند؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["shenakht.docx"], "expected_keywords": ["شناخت", "جهان"], "type": "adversarial"}
+{"question": "نام فصل اول کتاب شیمی دهم چیست؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["یادداشت فصل اول شیمی"], "expected_keywords": ["کیهان زادگاه الفبای هستی"], "type": "factual"}
+{"question": "فصل اول از کدام صفحه شروع می‌شود و درباره چیست؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": ["یادداشت فصل اول شیمی"], "expected_keywords": ["صفحه ۱", "طیف"], "type": "precise"}
+{"question": "پایتخت مریخ کجاست؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": [], "expected_keywords": [], "type": "unanswerable"}
+{"question": "قیمت دلار امروز چقدر است؟", "kb_id": "d83dfe01-9201-44f5-bf3a-92da7287f1ad", "expected_sources": [], "expected_keywords": [], "type": "unanswerable"}

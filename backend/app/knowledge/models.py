@@ -4,9 +4,10 @@ Chain: KnowledgeBase -> Source -> Document -> PageSegment -> Chunk
 (+ Concept / Relation for entities). Raw files live in object storage;
 PostgreSQL keeps metadata + structure + embeddings.
 
-Supported MVP source types (video is reserved for the future and is
-rejected by the ingestion worker, see parsers/base.py):
-pdf, docx, pptx, txt, md, image, audio, url, note
+Supported MVP source types (video = audio-track transcription only,
+no frame analysis; see parsers/video.py; excel/csv = structured sheets
+via DuckDB, see knowledge/excel/):
+pdf, docx, pptx, txt, md, image, audio, video, url, note, excel, csv
 """
 
 import uuid
@@ -25,9 +26,14 @@ from app.common.base import (
     utcnow,
 )
 
-# MVP source types. "video" is intentionally NOT listed: the worker rejects it.
-SOURCE_TYPES = ("pdf", "docx", "pptx", "txt", "md", "image", "audio", "url", "note")
+# MVP source types. "video" = audio-track transcription only (no frame
+# analysis); "excel"/"csv" = structured sheets (DuckDB) + RAG summaries.
+SOURCE_TYPES = ("pdf", "docx", "pptx", "txt", "md", "image", "audio",
+                "video", "url", "note", "excel", "csv")
 AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a")
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov")
+EXCEL_EXTENSIONS = (".xlsx",)
+CSV_EXTENSIONS = (".csv",)
 SOURCE_STATUSES = ("pending", "processing", "ready", "failed")
 
 
@@ -73,6 +79,11 @@ class Source(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
     status: Mapped[str] = mapped_column(String(20), default="pending")
     error: Mapped[str] = mapped_column(Text, default="")
+    # Heartbeat for the stuck-task watchdog (migration 0018): set when a
+    # task is queued/started, cleared on ready/failed. NULL = not running.
+    processing_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, nullable=True
+    )
     # Phase 3 stabilization: parse/OCR/vision provenance per source
     # ({parser, ocr_*, vision counts...}). Read-only UX + debugging.
     parse_meta: Mapped[dict] = mapped_column(

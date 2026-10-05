@@ -27,6 +27,12 @@ Base.metadata.create_all(engine)
 PROMPTS: list[str] = []
 
 
+def _last_chat_prompt() -> str:
+    """Latest chat prompt (skips auto-title prompts appended after turns)."""
+    return next(p for p in reversed(PROMPTS)
+                if not p.startswith("یک عنوان فارسی"))
+
+
 @pytest.fixture()
 def db():
     Base.metadata.drop_all(engine)
@@ -128,8 +134,19 @@ def test_agent_crud_and_chat_flow(client):
     assert body["citations"][0]["chunk_id"] == str(seed["chunk"].id)
     assert body["citations"][0]["page_no"] == 3
     conv_id = body["conversation_id"]
-    assert "Be concise." in PROMPTS[-1]  # custom instructions win
-    assert "grade" not in PROMPTS[-1]  # teacher spec has no memory tools
+    assert "Be concise." in _last_chat_prompt()  # custom instructions win
+    assert "grade" not in _last_chat_prompt()  # teacher spec has no memory tools
+
+    before = c.get(f"/workspaces/{wa}/agents/{agent_id}/conversations", headers=_h(ta)).json()
+    preview = c.post(
+        f"/workspaces/{wa}/agents/{agent_id}/chat/preview",
+        headers=_h(ta),
+        json={"message": "خلاصه این جلسه را بده", "kb_id": str(seed["kb"])},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["answer"] == "پاسخ تستی [1]"
+    after = c.get(f"/workspaces/{wa}/agents/{agent_id}/conversations", headers=_h(ta)).json()
+    assert len(after) == len(before)  # preview is not a chat turn
 
     # student coach DOES have memory tools: the same fact flows into its prompt
     s = c.post(f"/workspaces/{wa}/agents",
@@ -137,13 +154,13 @@ def test_agent_crud_and_chat_flow(client):
     chat_s = c.post(f"/workspaces/{wa}/agents/{s['id']}/chat", headers=_h(ta),
                     json={"message": "Plan my week"})
     assert chat_s.status_code == 200
-    assert "grade" in PROMPTS[-1] and "9th" in PROMPTS[-1]  # memory injected
+    assert "grade" in _last_chat_prompt() and "9th" in _last_chat_prompt()  # memory injected
 
     # history persists; second turn sees the first
     chat2 = c.post(f"/workspaces/{wa}/agents/{agent_id}/chat", headers=_h(ta),
                    json={"message": "And bases?", "conversation_id": conv_id})
     assert chat2.json()["conversation_id"] == conv_id
-    assert "Explain acids" in PROMPTS[-1]
+    assert "Explain acids" in _last_chat_prompt()
 
     msgs = c.get(f"/workspaces/{wa}/conversations/{conv_id}/messages", headers=_h(ta)).json()
     assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant"]

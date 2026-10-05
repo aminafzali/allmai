@@ -1,0 +1,3 @@
+{"question": "SAMPLE ONLY — اسیدها در آب چه می‌کنند؟", "kb_id": "00000000-0000-0000-0000-000000000000", "expected_sources": ["acids.pdf"], "expected_keywords": ["پروتون"], "type": "factual"}
+{"question": "SAMPLE ONLY — جدول pH لیمو چند است؟", "kb_id": "00000000-0000-0000-0000-000000000000", "expected_sources": ["acids.pdf"], "expected_keywords": ["لیمو"], "type": "caption"}
+{"question": "SAMPLE ONLY — پایتخت مریخ کجاست؟", "kb_id": "00000000-0000-0000-0000-000000000000", "expected_sources": [], "expected_keywords": [], "type": "unanswerable"}

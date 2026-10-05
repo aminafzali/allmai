@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, streamChat, type StreamEvent } from "@/lib/admin";
+import { api, type StreamEvent } from "@/lib/admin";
+import { streamChatResolvingTools } from "@/lib/clientToolLoop";
 import { FormError, KBSelect, WorkspaceSelect } from "@/components/Selectors";
 
 type Msg = { role: string; content: string; citations?: any[] };
-type Status = "idle" | "sending" | "streaming" | "error" | "done";
+type Status = "idle" | "sending" | "searching" | "streaming" | "error" | "done";
 
 export default function TeacherChat() {
   const [ws, setWs] = useState("");
@@ -35,8 +36,9 @@ export default function TeacherChat() {
     let cits: any[] = [];
     let cid: string | null = convId;
     try {
-      await streamChat(
+      await streamChatResolvingTools(
         `/workspaces/${ws}/agents/${agentId}/chat/stream`,
+        `/workspaces/${ws}/agents/${agentId}/chat/resume`,
         { message: text, kb_id: kb || null, conversation_id: convId },
         (e: StreamEvent) => {
           if (e.type === "meta") {
@@ -54,6 +56,8 @@ export default function TeacherChat() {
               }
               return [...h, { role: "assistant-stream", content: snapshot }];
             });
+          } else if (e.type === "searching") {
+            setStatus("searching");
           } else if (e.type === "done") {
             cid = e.conversation_id;
             setConvId(e.conversation_id);
@@ -147,6 +151,7 @@ export default function TeacherChat() {
           </div>
         ))}
         {status === "sending" && <p className="text-sm text-slate-500">در حال ارسال…</p>}
+        {status === "searching" && <p className="text-sm text-slate-500">در حال جستجو در مرورگر شما…</p>}
       </div>
       {agentId && (
         <form onSubmit={submit} className="mt-3 flex gap-2">
@@ -155,12 +160,12 @@ export default function TeacherChat() {
             placeholder="پیام…"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            disabled={status === "sending" || status === "streaming"}
+            disabled={status === "sending" || status === "streaming" || status === "searching"}
           />
           <button
             className="rounded bg-green-700 px-4 py-2 text-white disabled:opacity-50"
             type="submit"
-            disabled={status === "sending" || status === "streaming"}
+            disabled={status === "sending" || status === "streaming" || status === "searching"}
           >
             ارسال
           </button>

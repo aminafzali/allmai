@@ -1,11 +1,11 @@
-"""Parser ports. RAG-Anything lives ONLY behind ``ParserPort``.
+"""Parser ports. Every extractor returns a ``ParsedDocument`` with
+``ParsedElement``s (text/heading/paragraph/list/table/image/figure/
+equation + page/section chain) that chunking/RAG consumes.
 
-Phase 2: the parser subsystem (get_parser("docling") -> parse_document)
-produces a content_list that ``normalize`` turns into ``ParsedDocument``
-with ``ParsedElement``s (text/table/image/figure/equation + page/bbox).
-Full-engine paths (RAGAnything class, LightRAG, ainsert, aquery,
-process_document_complete, insert_content_list) are FORBIDDEN in app code
-(enforced by tests/test_architecture.py).
+Heavy vendor engines (RAG-Anything, LightRAG, Docling, Zep) are FORBIDDEN
+in app code (enforced by tests/test_architecture.py): extraction is our
+own structured pipeline (Gemini Flash via GapGPT for PDFs, deterministic
+local parsers for the rest) over PostgreSQL + object storage.
 """
 
 from dataclasses import dataclass, field
@@ -13,8 +13,9 @@ from typing import Protocol
 
 from app.knowledge.models import AUDIO_EXTENSIONS, SOURCE_TYPES
 
-# Structured element kinds (Phase 2 Document Core).
-ELEMENT_KINDS = ("text", "heading", "table", "image", "figure", "equation")
+# Structured element kinds (Phase 2 Document Core + P0 section chain).
+ELEMENT_KINDS = ("text", "heading", "paragraph", "list", "list_item",
+                 "table", "image", "figure", "equation")
 
 
 class UnsupportedSourceError(ValueError):
@@ -59,9 +60,12 @@ class ParsedDocument:
     duration_ms: int = 0
     # Phase 2: structured elements (empty for legacy fallback parsers).
     elements: list[ParsedElement] = field(default_factory=list)
-    # Phase 2: parse provenance, e.g. {"parser": "docling-fa-refill",
+    # Parse provenance, e.g. {"parser": "gemini-structured",
     # "ocr_degraded": True, "ocr_empty_pages": [3]}.
     parse_meta: dict = field(default_factory=dict)
+    # Structured payloads for the worker (NOT embedded): e.g. Excel
+    # SheetInfo list under extra["excel_sheets"] for the DuckDB build.
+    extra: dict = field(default_factory=dict)
 
 
 class ParserPort(Protocol):
@@ -70,12 +74,15 @@ class ParserPort(Protocol):
 
 
 def validate_source_type(source_type: str, filename: str = "") -> str:
-    """Phase-0 guard: reject video and unknown types loudly."""
+    """Guard unknown types loudly. Video = audio-track transcription only
+    (no frame analysis); excel = .xlsx workbooks; csv = .csv files."""
+    from app.knowledge.models import (
+        CSV_EXTENSIONS,
+        EXCEL_EXTENSIONS,
+        VIDEO_EXTENSIONS,
+    )
+
     st = source_type.lower().strip()
-    if st == "video":
-        raise UnsupportedSourceError(
-            "video sources are reserved for the future and not processed in MVP."
-        )
     if st not in SOURCE_TYPES:
         raise UnsupportedSourceError(f"unsupported source type: {source_type!r}")
     if st == "audio" and filename:
@@ -83,5 +90,23 @@ def validate_source_type(source_type: str, filename: str = "") -> str:
         if not name.endswith(AUDIO_EXTENSIONS):
             raise UnsupportedSourceError(
                 f"audio MVP supports {', '.join(AUDIO_EXTENSIONS)}; got {filename!r}"
+            )
+    if st == "video" and filename:
+        name = filename.lower()
+        if not name.endswith(VIDEO_EXTENSIONS):
+            raise UnsupportedSourceError(
+                f"video supports {', '.join(VIDEO_EXTENSIONS)}; got {filename!r}"
+            )
+    if st == "excel" and filename:
+        name = filename.lower()
+        if not name.endswith(EXCEL_EXTENSIONS):
+            raise UnsupportedSourceError(
+                f"excel supports {', '.join(EXCEL_EXTENSIONS)}; got {filename!r}"
+            )
+    if st == "csv" and filename:
+        name = filename.lower()
+        if not name.endswith(CSV_EXTENSIONS):
+            raise UnsupportedSourceError(
+                f"csv supports {', '.join(CSV_EXTENSIONS)}; got {filename!r}"
             )
     return st

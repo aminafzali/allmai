@@ -106,8 +106,13 @@ export async function apiHealth(): Promise<{ status: string }> {
 export type StreamEvent =
   | { type: "meta"; conversation_id: string; citations?: any[]; has_plan?: boolean }
   | { type: "token"; text: string }
-  | { type: "done"; conversation_id: string; citations?: any[]; has_plan?: boolean }
+  | { type: "tool_call"; conversation_id: string; call_id: string; name: string; arguments: { query: string }; client_spec?: any }
+  | { type: "progress"; conversation_id: string; stage: string; detail: string }
+  | { type: "searching"; conversation_id: string; tool?: string }
+  | { type: "done"; conversation_id: string; citations?: any[]; has_plan?: boolean; leads_saved?: number; title?: string; remaining?: number }
   | { type: "error"; message: string };
+
+export type ToolCallEvent = Extract<StreamEvent, { type: "tool_call" }>;
 
 /** POST SSE stream against our own FastAPI. Calls onEvent per frame. */
 export async function streamChat(

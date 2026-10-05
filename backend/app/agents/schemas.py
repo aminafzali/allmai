@@ -52,6 +52,12 @@ class ChatIn(BaseModel):
     kb_id: uuid.UUID | None = None
 
 
+class ChatPreviewIn(BaseModel):
+    """One-off assistant generation that is deliberately NOT persisted."""
+    message: str
+    kb_id: uuid.UUID | None = None
+
+
 class CitationOut(BaseModel):
     n: int
     chunk_id: str
@@ -65,15 +71,23 @@ class ChatOut(BaseModel):
     answer: str
     citations: list[CitationOut]
     conversation_id: str
+    remaining: int = 0  # translation pieces left ("ادامه بده")
 
 
 class ConversationOut(BaseModel):
     id: uuid.UUID
     agent_id: uuid.UUID
     state: dict
+    title: str = ""
+    pinned: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ConversationPatch(BaseModel):
+    title: str | None = None
+    pinned: bool | None = None
 
 
 class MessageOut(BaseModel):
@@ -146,3 +160,47 @@ class DefinitionOut(BaseModel):
 
 class DefinitionKnowledgeUpdate(BaseModel):
     kb_ids: list[uuid.UUID] = []
+
+
+# ---------- Client-executed search tools (browser runs, server resumes) ----------
+
+class ToolResultIn(BaseModel):
+    call_id: str
+    ok: bool = True
+    results: list[dict] = []
+    served_by: str = ""
+    error: str = ""
+    debug: str = ""  # browser-side trace (endpoint attempts), logged only
+
+
+class ChatResumeIn(BaseModel):
+    conversation_id: uuid.UUID
+    results: list[ToolResultIn] = []
+
+
+# ---------- Leads (lead-mining rows) ----------
+
+class LeadOut(BaseModel):
+    id: uuid.UUID
+    query: str = ""
+    name: str = ""
+    address: str = ""
+    phone: str = ""
+    hours: str = ""
+    website: str = ""
+    lat: float | None = None
+    lng: float | None = None
+    source: str = ""
+    status: str = "new"
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LeadStatusIn(BaseModel):
+    lead_ids: list[uuid.UUID] = []
+    status: str = "new"
+
+
+class LeadsImportIn(BaseModel):
+    lead_ids: list[uuid.UUID] = []

@@ -121,7 +121,7 @@ def test_admin_settings_rbac_and_update(client, db):
     assert body["chat.default"]["model"] == "gpt-4o-mini"
     assert body["embedding.default"]["model"] == "text-embedding-3-small"
     assert body["embedding.default"]["dim"] == 1536
-    assert body["audio.transcription"]["model"] == "whisper-1"
+    assert body["audio.transcription"]["model"] == "gpt-4o-mini-transcribe"
 
     up = client.put(
         "/admin/ai-settings",

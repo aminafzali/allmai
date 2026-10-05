@@ -9,6 +9,7 @@ import {
   FileUp,
   FlaskConical,
   Gauge,
+  Globe2,
   Home,
   LogOut,
   MessagesSquare,
@@ -39,6 +40,7 @@ const GROUPS: { title: string; links: { href: string; label: string; icon: any }
     title: "دانش",
     links: [
       { href: "/admin/knowledge-bases", label: "بیس‌های دانش", icon: Database },
+      { href: "/admin/global-knowledge", label: "پایگاه‌های دانش سراسری", icon: Globe2 },
       { href: "/admin/sources", label: "سورس‌ها", icon: FileUp },
       { href: "/admin/documents", label: "اسناد", icon: FileUp },
       { href: "/admin/processing", label: "وضعیت پردازش", icon: Gauge },

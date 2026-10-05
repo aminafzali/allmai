@@ -22,12 +22,10 @@ python-docx
 python-pptx
 beautifulsoup4
 pillow
-# --- Phase 2 Document Core (pinned from Spike on Win/Python 3.12) ---
-# docling 2.130.0: layout/tableformer/rapidocr via onnxruntime (CPU).
-# easyocr 1.7.2: mandatory Persian OCR (RapidOCR has no 'fa' model — spike).
-# raganything 1.4.1: parser subsystem ONLY (get_parser("docling"));
-#   full engine/LightRAG paths are forbidden (see test_architecture.py).
-docling==2.130.0
-easyocr==1.7.2
+openpyxl
+duckdb
+yt-dlp
+imageio-ffmpeg
+# --- Structured PDF extraction (Gemini Flash via GapGPT, no Docling) ---
+# pypdfium2: rasterizes textless pages for Gemini vision structuring.
 pypdfium2==5.13.0
-raganything==1.4.1

@@ -236,3 +236,47 @@ def test_source_transcript_view(client):
     to = _token(c, "o@x.com")
     assert c.get(f"/workspaces/{wid}/knowledge-bases/{kb_id}/sources/{sid}/transcript",
                  headers=_h(to)).status_code == 404
+
+
+def test_meeting_save_is_explicit_one_source_with_original_audio(client):
+    """Meeting drafts are not sources until explicit save; on save the
+    recorded audio blob and the approved transcript share ONE indexed
+    source (no second STT pass, no duplicate docs)."""
+    from app.knowledge.models import Chunk, Document, PageSegment, Source
+    from app.knowledge.retrieval.hybrid import get_embed_fn
+
+    c, fake = client
+    with TestingSession() as s:
+        u = _user(s, "meeting@x.com")
+    token = _token(c, "meeting@x.com")
+    h = _h(token)
+    wid = c.post("/workspaces", headers=h, json={"name": "Meetings", "type": "shared"}).json()["id"]
+    kb = c.post(f"/workspaces/{wid}/knowledge-bases", headers=h, json={"title": "KB"}).json()["id"]
+
+    # Merely starting/recording a meeting performs no POST, thus the KB is empty.
+    assert c.get(f"/workspaces/{wid}/knowledge-bases/{kb}/sources", headers=h).json() == []
+
+    app.dependency_overrides[get_embed_fn] = lambda: (lambda texts: [[0.1] * 1536 for _ in texts])
+    audio = b"\x1a\x45\xdf\xa3" + b"test-webm-audio"
+    saved = c.post(
+        f"/workspaces/{wid}/knowledge-bases/{kb}/sources/meeting",
+        headers=h,
+        data={"title": "جلسه برنامه‌ریزی", "text": "[علی ۱۰:۰۰]\nبحث درباره زمان تحویل\n\nیادداشت‌های جلسه:\nـ تماس با تیم"},
+        files={"file": ("meeting.webm", io.BytesIO(audio), "audio/webm")},
+    )
+    assert saved.status_code == 201, saved.text
+    row = saved.json()
+    assert row["type"] == "video" and row["status"] == "ready"
+    assert row["parse_meta"]["meeting_session"] is True
+    assert audio in fake.objects.values()
+
+    transcript = c.get(
+        f"/workspaces/{wid}/knowledge-bases/{kb}/sources/{row['id']}/transcript", headers=h
+    )
+    assert transcript.status_code == 200
+    assert "بحث درباره زمان تحویل" in transcript.json()["text"]
+    assert "تماس با تیم" in transcript.json()["text"]
+    with TestingSession() as s:
+        assert s.query(Source).filter(Source.kb_id == uuid.UUID(kb)).count() == 1
+        assert s.query(Document).filter(Document.source_id == uuid.UUID(row["id"])).count() == 1
+        assert s.query(Chunk).filter(Chunk.kb_id == uuid.UUID(kb)).count() > 0
