@@ -7,7 +7,6 @@ chunk -> embed -> PostgreSQL -> ready/failed.
 functions). The Celery task builds production dependencies.
 """
 
-import traceback
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -119,6 +118,60 @@ def _record_extraction(src, parsed, ok: bool, error: str = "") -> None:
                   "filename": src.filename if src is not None else ""})
     except Exception:
         pass
+
+
+def _orphan_threshold_s() -> int:
+    """Seconds after which a processing row is presumed ownerless.
+
+    Single definition shared by the orphan reset and the duplicate-run
+    guard below: a run younger than this may still be alive (heartbeat),
+    so nothing else may claim its source.
+    """
+    try:
+        from app.core.config import get_settings as _gs
+
+        return max(600, int(_gs().INGEST_ORPHAN_S))
+    except Exception:
+        return 2400
+
+
+def is_fresh_processing(src) -> bool:
+    """True while a run on this source may still be alive.
+
+    Used by run_ingest (refuse duplicate tasks) and by retry_source
+    (refuse requeueing a live run): both must agree, or a manual retry
+    could double-spend model tokens next to a running extraction.
+    """
+    if src is None or (src.status or "") != "processing":
+        return False
+    started = src.processing_started_at or src.created_at
+    if started is None:
+        return False
+    try:
+        from datetime import timezone as _tz
+
+        from app.common.base import utcnow as _now
+
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=_tz.utc)
+        return (_now() - started).total_seconds() < _orphan_threshold_s()
+    except Exception:
+        return False
+
+
+def _load_claim(db: Session, source_id):
+    """Load one source row, locking it on Postgres.
+
+    The row lock serializes concurrent duplicate tasks: the loser blocks
+    until the winner commits its claim, then sees fresh processing and
+    refuses. Skipped off-Postgres (SQLite tests are single-threaded).
+    """
+    from app.common.base import coerce_uuid
+
+    q = db.query(Source).filter(Source.id == coerce_uuid(source_id))
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        q = q.with_for_update()
+    return q.first()
 
 
 def _bind_admin_read(db: Session) -> None:
@@ -387,21 +440,28 @@ def run_ingest(
         # when the caller session already carries context, e.g. tests).
         if workspace_id is not None:
             set_workspace_context(db, workspace_id)
-        src = db.query(Source).filter(Source.id == coerce_uuid(source_id)).first()
+        src = _load_claim(db, source_id)
         if src is None and workspace_id is None:
             # Global source (workspace NULL): member contexts cannot even
             # read the row (RLS by design) — bind transient admin context.
             _bind_admin_read(db)
-            src = db.query(Source).filter(Source.id == coerce_uuid(source_id)).first()
+            src = _load_claim(db, source_id)
         if src is None:
             return {"ok": False, "error": "source not found"}
+        if is_fresh_processing(src):
+            # DUPLICATE RUN REFUSED — double delivery, double-click retry,
+            # orphan-race or broker redelivery while a run is alive. Return
+            # WITHOUT touching anything: above all, without burning model
+            # tokens on a second extraction. The live run owns this source.
+            return {"ok": False,
+                    "error": "duplicate ingest ignored: source already processing"}
         if src.workspace_id is not None:
             set_workspace_context(db, src.workspace_id)
         else:
             _bind_admin_read(db)
-        from app.usage import context as _uctx
-
-        _uctx.bind_usage_context(workspace_id=src.workspace_id)
+        # Claim: this status flip (committed) is the lease. A concurrent
+        # duplicate blocks on the row lock above, then sees our fresh
+        # claim and refuses.
         src.status = "processing"
         src.error = ""
         from app.common.base import utcnow as _utcnow
@@ -505,14 +565,25 @@ def run_ingest(
             from app.ai.openai_compat import OpenAICompatProvider
 
             embed_fn = OpenAICompatProvider().embed
+        # Defensive blank filter (chunking already guarantees this, but a
+        # single blank input makes strict gateways 400 the WHOLE batch —
+        # killing the job AFTER extraction tokens were spent).
+        pairs = [(d, t) for d, t in zip(drafts, final_texts)
+                 if (t or "").strip()]
+        dropped = len(drafts) - len(pairs)
+        if dropped:
+            import logging as _logging
+
+            _logging.getLogger(__name__).warning(
+                "ingest dropped %d blank texts pre-embed", dropped)
         try:
-            vectors = embed_fn(final_texts) if drafts else []
+            vectors = embed_fn([t for _, t in pairs]) if pairs else []
         except Exception as exc:
             raise RuntimeError(f"Embed: {type(exc).__name__}: {exc}") from exc
 
         new_chunks: list[Chunk] = []
         try:
-            for i, (draft, vector, content) in enumerate(zip(drafts, vectors, final_texts)):
+            for i, ((draft, content), vector) in enumerate(zip(pairs, vectors)):
                 # SEGMENT text stays original (locked D3); the CHUNK carries
                 # caption + vision description (composed here, embedded above).
                 seg = PageSegment(
@@ -603,15 +674,11 @@ def reset_orphaned_ingests(db=None, enqueue_fn=None, stale_s: int | None = None,
     own = db is None
     reset, requeued = 0, 0
     try:
-        from app.core.config import get_settings as _gs
         from app.core.database import SessionLocal as _SL
 
         db = db or _SL()
         if stale_s is None:
-            try:
-                stale_s = max(600, int(_gs().INGEST_ORPHAN_S))
-            except Exception:
-                stale_s = 2400
+            stale_s = _orphan_threshold_s()
         from datetime import timedelta as _td
 
         from app.knowledge.models import Source as _Source
@@ -668,15 +735,15 @@ def reset_orphaned_ingests(db=None, enqueue_fn=None, stale_s: int | None = None,
 def _task():
     from workers.celery_app import celery
 
-    @celery.task(name="ingest_source", bind=True, max_retries=3)
+    @celery.task(name="ingest_source", bind=True, max_retries=0)
     def ingest_source(self, source_id: str, workspace_id: str | None = None) -> dict:
         # Tenant travels in the task message; run_ingest binds RLS context
         # on its own session before touching any row.
-        try:
-            return run_ingest(source_id, workspace_id=workspace_id)
-        except Exception as exc:  # broker-visible retry for infra errors
-            traceback.print_exc()
-            raise self.retry(exc=exc, countdown=60)
+        # NO broker retry (max_retries=0), deliberately: every execution
+        # burns model tokens, so a failed extraction must NEVER re-run by
+        # itself. run_ingest records the failure on the row; the user
+        # re-triggers manually via «استخراج مجدد» when the source is idle.
+        return run_ingest(source_id, workspace_id=workspace_id)
 
     return ingest_source
 

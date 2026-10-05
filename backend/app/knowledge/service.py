@@ -127,13 +127,16 @@ def create_file_source(
     src.filename = filename[:512]
     src.mime = mime
     src.size_bytes = len(blob)
-    if enqueue_ingest(src.id, ws.id):
-        _mark_processing(src)
+    # Intentionally left pending: the worker claims the source itself
+    # (status -> processing, committed). Marking it here would defeat the
+    # duplicate-run guard — the worker would mistake its own job for
+    # someone else's live run and refuse it.
+    enqueue_ingest(src.id, ws.id)
     db.commit()
     db.refresh(src)
     audit(db, "knowledge.source_upload", actor_user_id=user.id, workspace_id=ws.id,
-          entity="source", entity_id=src.id,
-          meta={"type": source_type, "bytes": len(blob), "status": src.status})
+           entity="source", entity_id=src.id,
+           meta={"type": source_type, "bytes": len(blob), "status": src.status})
     return src
 
 
@@ -217,13 +220,13 @@ def create_global_file_source(
     src.filename = filename[:512]
     src.mime = mime
     src.size_bytes = len(blob)
-    if enqueue_ingest(src.id, None):
-        _mark_processing(src)
+    # Left pending for the worker claim (see create_file_source).
+    enqueue_ingest(src.id, None)
     db.commit()
     db.refresh(src)
     audit(db, "knowledge.global_source_upload", actor_user_id=user.id,
-          entity="source", entity_id=src.id,
-          meta={"type": source_type, "bytes": len(blob), "status": src.status})
+           entity="source", entity_id=src.id,
+           meta={"type": source_type, "bytes": len(blob), "status": src.status})
     return src
 
 
@@ -266,8 +269,8 @@ def create_global_link_source(
     src.filename = (title or source_type)[:512]
     src.mime = "application/json" if source_type == "url" else "text/markdown"
     src.size_bytes = len(descriptor)
-    if enqueue_ingest(src.id, None):
-        _mark_processing(src)
+    # Left pending for the worker claim (see create_file_source).
+    enqueue_ingest(src.id, None)
     db.commit()
     db.refresh(src)
     audit(db, "knowledge.global_source_create", actor_user_id=user.id,
@@ -300,8 +303,8 @@ def create_link_source(
     src.filename = (title or source_type)[:512]
     src.mime = "application/json" if source_type == "url" else "text/markdown"
     src.size_bytes = len(descriptor)
-    if enqueue_ingest(src.id, ws.id):
-        _mark_processing(src)
+    # Left pending for the worker claim (see create_file_source).
+    enqueue_ingest(src.id, ws.id)
     db.commit()
     db.refresh(src)
     audit(db, "knowledge.source_create", actor_user_id=user.id, workspace_id=ws.id,
@@ -318,12 +321,6 @@ def list_sources(db: Session, ws: Workspace, kb: KnowledgeBase) -> list[Source]:
         .order_by(Source.created_at.desc())
         .all()
     )
-
-
-def _mark_processing(src: Source) -> None:
-    """Heartbeat: task queued/started (watchdog judges by this clock)."""
-    src.status = "processing"
-    src.processing_started_at = utcnow()
 
 
 def _clear_processing(src: Source, status: str, error: str = "") -> None:
@@ -369,20 +366,29 @@ def mark_stale_ingests(db: Session, workspace_id=None,
 
 
 def retry_source(db: Session, ws: Workspace, user: User, source_id) -> Source:
-    """Re-queue a pending/failed/processing-stuck source for ingestion."""
+    """Re-queue an IDLE source for ingestion (manual «استخراج مجدد»).
+
+    A live run is never disturbed: requeueing a fresh-processing source
+    is rejected loudly (409) instead of spawning a second extraction
+    next to it — each run burns model tokens. The worker claims the
+    requeued source itself, so it stays pending until then.
+    """
     from app.auth.service import audit
+    from workers.tasks import is_fresh_processing
 
     src = get_source(db, ws, source_id)
+    if is_fresh_processing(src):
+        raise HTTPException(
+            409, "استخراج این سند هم‌اکنون در حال اجراست؛ "
+                 "تا پایان آن صبر کنید یا بعداً «استخراج مجدد» را بزنید.")
     src.status = "pending"
     src.error = ""
     src.processing_started_at = utcnow()
     db.commit()
-    if enqueue_ingest(src.id, ws.id):
-        _mark_processing(src)
-        db.commit()
+    enqueue_ingest(src.id, ws.id)
     db.refresh(src)
     audit(db, "knowledge.source_retry", actor_user_id=user.id, workspace_id=ws.id,
-          entity="source", entity_id=src.id, meta={"status": src.status})
+           entity="source", entity_id=src.id, meta={"status": src.status})
     return src
 
 
